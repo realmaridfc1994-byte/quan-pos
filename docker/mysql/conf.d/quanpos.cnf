@@ -1,0 +1,33 @@
+[mysqld]
+
+# --- Bảng mã: tiếng Việt có dấu, emoji, không lỗi font ---------------------
+character-set-server            = utf8mb4
+collation-server                = utf8mb4_0900_ai_ci
+
+# --- Múi giờ Việt Nam -------------------------------------------------------
+# Dùng dạng lệch giờ (+07:00) để không cần nạp bảng múi giờ vào MySQL.
+default-time-zone               = '+07:00'
+
+# --- Chế độ NGHIÊM NGẶT -----------------------------------------------------
+# Quan trọng với hệ thống tiền bạc: nhập sai kiểu dữ liệu thì MySQL BÁO LỖI,
+# thay vì âm thầm cắt bớt hoặc đổi thành số 0. Thà lỗi ngay còn hơn sai tiền.
+sql_mode = STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+
+# --- Bộ nhớ: quán 15 bàn, dữ liệu rất nhỏ, không cần nhiều -----------------
+innodb_buffer_pool_size         = 256M
+max_connections                 = 100
+
+# --- An toàn dữ liệu khi mất điện đột ngột ----------------------------------
+# Quán nhậu hay cúp điện. Hai dòng này bảo đảm giao dịch đã ghi là ghi thật.
+innodb_flush_log_at_trx_commit  = 1
+sync_binlog                     = 1
+
+# --- Thời gian chờ khi hai người cùng mở một bàn ---------------------------
+# Người thứ hai chờ tối đa 5 giây rồi nhận thông báo, thay vì treo máy 50 giây.
+innodb_lock_wait_timeout        = 5
+
+[client]
+default-character-set           = utf8mb4
+
+[mysql]
+default-character-set           = utf8mb4

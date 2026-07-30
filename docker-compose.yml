@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+# MÔI TRƯỜNG DATABASE CHO POS QUÁN NHẬU
+#
+# Chạy:      docker compose up -d
+# Tắt:       docker compose down
+# Xoá sạch:  docker compose down -v      (XOÁ LUÔN DỮ LIỆU — xem hướng dẫn)
+#
+# Sau khi chạy:
+#   - MySQL 8.4     : localhost cổng 3307
+#   - phpMyAdmin    : http://localhost:8080  (giao diện bấm chuột để xem dữ liệu)
+#
+# Vì sao cổng 3307 chứ không phải 3306?
+#   Máy này đang có XAMPP (MariaDB) chiếm sẵn cổng 3306. Dùng 3307 để hai thứ
+#   sống chung hoà bình, không phải tắt cái nào cả.
+# ---------------------------------------------------------------------------
+
+services:
+
+  mysql:
+    # Dựng từ docker/mysql/Dockerfile — xem file đó để biết vì sao không dùng
+    # thẳng image mysql:8.4 (Windows làm MySQL bỏ qua file cấu hình)
+    build:
+      context: ./docker/mysql
+    image: quanpos/mysql:8.4
+    container_name: quanpos-mysql
+    restart: unless-stopped
+    command:
+      # Bật log câu lệnh chậm để sau này dò báo cáo nào ì ạch
+      - --slow-query-log=1
+      - --long-query-time=1
+    environment:
+      MYSQL_ROOT_PASSWORD: quanpos_root_2026
+      MYSQL_DATABASE: quan_pos
+      MYSQL_USER: quanpos
+      MYSQL_PASSWORD: quanpos_secret
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - "3307:3306"
+    volumes:
+      # Dữ liệu thật, sống sót qua mọi lần tắt mở container
+      - mysql_data:/var/lib/mysql
+      # Các file .sql ở đây CHẠY TỰ ĐỘNG khi khởi tạo lần đầu
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pquanpos_root_2026"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  phpmyadmin:
+    image: phpmyadmin:5.2
+    container_name: quanpos-phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: quanpos_root_2026
+      UPLOAD_LIMIT: 64M
+    ports:
+      - "8080:80"
+
+volumes:
+  mysql_data:
+    name: quanpos_mysql_data
