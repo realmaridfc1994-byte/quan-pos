@@ -18,15 +18,17 @@ CREATE TABLE users (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     name                VARCHAR(100)    NOT NULL COMMENT 'Tên hiển thị trên bill và tem',
     username            VARCHAR(50)     NOT NULL COMMENT 'Tên đăng nhập',
+    phone               VARCHAR(20)     NOT NULL COMMENT 'Số điện thoại, dùng để đăng nhập trên máy POS',
     password            VARCHAR(255)    NOT NULL COMMENT 'Mật khẩu đã mã hoá (bcrypt)',
     pin_code            VARCHAR(255)    NULL     COMMENT 'Mã PIN 4-6 số đã mã hoá, dùng để duyệt nhanh việc hủy món',
-    role                ENUM('owner','cashier','waiter','kitchen') NOT NULL DEFAULT 'waiter',
+    role                ENUM('owner','manager','staff','kitchen') NOT NULL DEFAULT 'staff',
     is_active           TINYINT(1)      NOT NULL DEFAULT 1 COMMENT 'Nghỉ việc thì tắt cờ này, KHÔNG xoá',
     remember_token      VARCHAR(100)    NULL,
     created_at          TIMESTAMP       NULL,
     updated_at          TIMESTAMP       NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_users_username (username),
+    UNIQUE KEY uq_users_phone (phone),
     KEY idx_users_active_role (is_active, role)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

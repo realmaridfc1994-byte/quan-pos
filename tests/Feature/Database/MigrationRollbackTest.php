@@ -34,7 +34,9 @@ it('migrate tạo đủ 15 bảng theo docs/schema.md', function () {
 });
 
 it('rollback xoá sạch cả 15 bảng, không lỗi ràng buộc khoá ngoại', function () {
-    Artisan::call('migrate:rollback', ['--step' => 15]);
+    // Không hardcode số bước: từ khi có thêm migration hạ tầng (Sanctum, Activitylog)
+    // nằm cùng batch với 15 migration nghiệp vụ, rollback nguyên batch mới xoá sạch đúng cả 15 bảng.
+    Artisan::call('migrate:rollback');
 
     foreach (danhSachBang() as $bang) {
         expect(Schema::hasTable($bang))->toBeFalse("Bảng {$bang} vẫn còn sau khi rollback.");

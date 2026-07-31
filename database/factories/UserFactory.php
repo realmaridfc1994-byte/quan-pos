@@ -15,6 +15,8 @@ use Illuminate\Support\Str;
  */
 class UserFactory extends Factory
 {
+    protected $model = User::class;
+
     protected static ?string $password;
 
     /**
@@ -25,9 +27,10 @@ class UserFactory extends Factory
         return [
             'name' => fake()->name(),
             'username' => fake()->unique()->userName(),
+            'phone' => fake()->unique()->numerify('09########'),
             'password' => static::$password ??= Hash::make('password'),
             'pin_code' => null,
-            'role' => UserRole::Waiter,
+            'role' => UserRole::Staff,
             'is_active' => true,
             'remember_token' => Str::random(10),
         ];
@@ -38,18 +41,28 @@ class UserFactory extends Factory
         return $this->state(fn (array $attributes) => ['role' => UserRole::Owner]);
     }
 
-    public function cashier(): static
+    public function manager(): static
     {
-        return $this->state(fn (array $attributes) => ['role' => UserRole::Cashier]);
+        return $this->state(fn (array $attributes) => ['role' => UserRole::Manager]);
     }
 
-    public function waiter(): static
+    public function staff(): static
     {
-        return $this->state(fn (array $attributes) => ['role' => UserRole::Waiter]);
+        return $this->state(fn (array $attributes) => ['role' => UserRole::Staff]);
     }
 
     public function kitchen(): static
     {
         return $this->state(fn (array $attributes) => ['role' => UserRole::Kitchen]);
+    }
+
+    public function withPin(string $pin): static
+    {
+        return $this->state(fn (array $attributes) => ['pin_code' => Hash::make($pin)]);
+    }
+
+    public function inactive(): static
+    {
+        return $this->state(fn (array $attributes) => ['is_active' => false]);
     }
 }

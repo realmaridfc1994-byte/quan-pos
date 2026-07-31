@@ -11,9 +11,13 @@ use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 final class Payment extends Model
 {
+    use LogsActivity;
+
     protected $fillable = [
         'uuid',
         'table_session_id',
@@ -66,5 +70,13 @@ final class Payment extends Model
     public function voidedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'voided_by_user_id');
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly($this->fillable)
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs();
     }
 }

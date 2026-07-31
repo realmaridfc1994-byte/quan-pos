@@ -46,7 +46,7 @@ Tổng cộng **15 bảng**, chia 5 nhóm.
 
 | # | Bảng | Vai trò bằng ngôn ngữ quán |
 |---|---|---|
-| 1 | `users` | **Sổ nhân viên.** Chủ quán, thu ngân, phục vụ, bếp. Mọi thao tác quan trọng đều truy được ra người làm. |
+| 1 | `users` | **Sổ nhân viên.** Chủ quán, quản lý, nhân viên, bếp. Mọi thao tác quan trọng đều truy được ra người làm. |
 | 2 | `shifts` | **Ca làm việc.** Mở ca lúc mấy giờ, trong két có sẵn bao nhiêu tiền lẻ, cuối ca đếm được bao nhiêu, lệch bao nhiêu, ai chịu trách nhiệm. |
 | 3 | `cash_movements` | **Sổ thu chi vặt trong ca.** "Chi 200k mua đá", "chủ rút 1 triệu", "khách bồi thường ly vỡ 50k". Không có sổ này thì cuối ca lúc nào cũng lệch quỹ mà không ai giải thích được vì sao. |
 
@@ -128,15 +128,17 @@ CREATE TABLE users (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     name                VARCHAR(100)    NOT NULL COMMENT 'Tên hiển thị trên bill và tem',
     username            VARCHAR(50)     NOT NULL COMMENT 'Tên đăng nhập',
+    phone               VARCHAR(20)     NOT NULL COMMENT 'Số điện thoại, dùng để đăng nhập trên máy POS',
     password            VARCHAR(255)    NOT NULL COMMENT 'Mật khẩu đã mã hoá (bcrypt)',
     pin_code            VARCHAR(255)    NULL     COMMENT 'Mã PIN 4-6 số đã mã hoá, dùng để duyệt nhanh việc hủy món',
-    role                ENUM('owner','cashier','waiter','kitchen') NOT NULL DEFAULT 'waiter',
+    role                ENUM('owner','manager','staff','kitchen') NOT NULL DEFAULT 'staff',
     is_active           TINYINT(1)      NOT NULL DEFAULT 1 COMMENT 'Nghỉ việc thì tắt cờ này, KHÔNG xoá',
     remember_token      VARCHAR(100)    NULL,
     created_at          TIMESTAMP       NULL,
     updated_at          TIMESTAMP       NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_users_username (username),
+    UNIQUE KEY uq_users_phone (phone),
     KEY idx_users_active_role (is_active, role)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -841,7 +843,8 @@ erDiagram
         bigint id PK
         string name "Tên nhân viên"
         string username UK
-        enum role "owner/cashier/waiter/kitchen"
+        string phone UK
+        enum role "owner/manager/staff/kitchen"
         bool is_active "Nghỉ việc thì tắt, không xoá"
     }
 
