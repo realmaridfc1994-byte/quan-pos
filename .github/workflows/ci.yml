@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  kiem-tra:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+          MYSQL_DATABASE: quan_pos
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: quan_pos
+      DB_USERNAME: root
+      DB_PASSWORD: ""
+
+    steps:
+      - name: Lấy code
+        uses: actions/checkout@v4
+
+      - name: Cài PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: mbstring, bcmath, pdo_mysql, intl
+          coverage: none
+
+      - name: Cài thư viện PHP
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Chuẩn bị .env
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Kiểm tra format code (Pint)
+        run: ./vendor/bin/pint --test
+
+      - name: Phân tích tĩnh (Larastan)
+        run: ./vendor/bin/phpstan analyse
+
+      - name: Chạy toàn bộ test (Pest)
+        run: ./vendor/bin/pest

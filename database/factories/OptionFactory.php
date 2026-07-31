@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
-use App\Domain\Catalog\Models\OptionGroup;
 use App\Domain\Catalog\Models\Option;
+use App\Domain\Catalog\Models\OptionGroup;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**

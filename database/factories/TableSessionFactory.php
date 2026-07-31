@@ -6,6 +6,7 @@ namespace Database\Factories;
 
 use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\TableSession;
+use App\Domain\Ordering\Models\TableSessionTable;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -80,7 +81,7 @@ class TableSessionFactory extends Factory
     public function withTable(): static
     {
         return $this->afterCreating(function (TableSession $session) {
-            \App\Domain\Ordering\Models\TableSessionTable::factory()
+            TableSessionTable::factory()
                 ->for($session)
                 ->create();
         });

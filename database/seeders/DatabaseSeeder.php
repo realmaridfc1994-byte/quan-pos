@@ -6,10 +6,10 @@ namespace Database\Seeders;
 
 use App\Domain\Catalog\Enums\Station;
 use App\Domain\Catalog\Models\Category;
+use App\Domain\Catalog\Models\Option;
 use App\Domain\Catalog\Models\OptionGroup;
 use App\Domain\Catalog\Models\Product;
 use App\Domain\Catalog\Models\ProductVariant;
-use App\Domain\Catalog\Models\Option;
 use App\Domain\Ordering\Models\DiningTable;
 use App\Domain\Staffing\Enums\UserRole;
 use App\Domain\Staffing\Models\User;
@@ -117,13 +117,15 @@ class DatabaseSeeder extends Seeder
         Option::query()->delete();
 
         $products = [
-            // Bia & nước (6 món)
+            // Bia & nước (8 món)
             ['name' => 'Bia Tiger', 'category' => 'Bia & nước', 'code' => 'TIGER', 'cost' => 8000, 'hasOptions' => true],
             ['name' => 'Bia Heineken', 'category' => 'Bia & nước', 'code' => 'HEIN', 'cost' => 9000, 'hasOptions' => true],
             ['name' => 'Bia Saigon', 'category' => 'Bia & nước', 'code' => 'SGN', 'cost' => 7500, 'hasOptions' => true],
             ['name' => 'Nước ngọt', 'category' => 'Bia & nước', 'code' => 'NCNGOT', 'cost' => 2000, 'hasOptions' => true],
             ['name' => 'Nước suối', 'category' => 'Bia & nước', 'code' => 'NSUOI', 'cost' => 1500, 'hasOptions' => false],
             ['name' => 'Cà phê đen', 'category' => 'Bia & nước', 'code' => 'CADENM', 'cost' => 3000, 'hasOptions' => false],
+            ['name' => 'Trà đá', 'category' => 'Bia & nước', 'code' => 'TRADA', 'cost' => 1000, 'hasOptions' => false],
+            ['name' => 'Rượu đế', 'category' => 'Bia & nước', 'code' => 'RUOUDE', 'cost' => 6000, 'hasOptions' => false],
 
             // Đồ nhắm (8 món)
             ['name' => 'Đậu phộng rang', 'category' => 'Đồ nhắm', 'code' => 'DAUPH', 'cost' => 5000, 'hasOptions' => false],
@@ -175,17 +177,21 @@ class DatabaseSeeder extends Seeder
             ['name' => 'Cơm bình dân', 'category' => 'Món chính', 'code' => 'COMBK', 'cost' => 4000, 'hasOptions' => false],
             ['name' => 'Súp cua', 'category' => 'Món chính', 'code' => 'SUPCUA', 'cost' => 5500, 'hasOptions' => false],
 
-            // Rau & canh (4 món)
+            // Rau & canh (6 món)
             ['name' => 'Canh chua tôm', 'category' => 'Rau & canh', 'code' => 'CANHCHUA', 'cost' => 4000, 'hasOptions' => false],
             ['name' => 'Dúi rau cải', 'category' => 'Rau & canh', 'code' => 'DUIRAU', 'cost' => 3000, 'hasOptions' => false],
             ['name' => 'Rau muống luộc', 'category' => 'Rau & canh', 'code' => 'RAUMUONG', 'cost' => 2500, 'hasOptions' => false],
             ['name' => 'Canh tảo cua', 'category' => 'Rau & canh', 'code' => 'CANHCUA', 'cost' => 4500, 'hasOptions' => false],
+            ['name' => 'Đậu bắp luộc', 'category' => 'Rau & canh', 'code' => 'DAUBAP', 'cost' => 2500, 'hasOptions' => false],
+            ['name' => 'Canh bí đao', 'category' => 'Rau & canh', 'code' => 'CANHBIDAO', 'cost' => 3500, 'hasOptions' => false],
 
-            // Tráng miệng (4 món)
+            // Tráng miệng (6 món)
             ['name' => 'Chè ba màu', 'category' => 'Tráng miệng', 'code' => 'CHEBAMAU', 'cost' => 3000, 'hasOptions' => false],
             ['name' => 'Kem vani', 'category' => 'Tráng miệng', 'code' => 'KEMVANI', 'cost' => 4000, 'hasOptions' => false],
             ['name' => 'Bánh flan', 'category' => 'Tráng miệng', 'code' => 'BANHFLAN', 'cost' => 2500, 'hasOptions' => false],
             ['name' => 'Chè khoai', 'category' => 'Tráng miệng', 'code' => 'CHEKHOAI', 'cost' => 2500, 'hasOptions' => false],
+            ['name' => 'Trái cây thập cẩm', 'category' => 'Tráng miệng', 'code' => 'TRAICAY', 'cost' => 5000, 'hasOptions' => false],
+            ['name' => 'Sữa chua', 'category' => 'Tráng miệng', 'code' => 'SUACHUA', 'cost' => 2000, 'hasOptions' => false],
         ];
 
         foreach ($products as $productData) {
