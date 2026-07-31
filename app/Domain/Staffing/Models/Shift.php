@@ -7,6 +7,8 @@ namespace App\Domain\Staffing\Models;
 use App\Domain\Billing\Models\Payment;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Staffing\Enums\ShiftStatus;
+use Database\Factories\ShiftFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -15,7 +17,13 @@ use Spatie\Activitylog\Traits\LogsActivity;
 
 final class Shift extends Model
 {
-    use LogsActivity;
+    /** @use HasFactory<ShiftFactory> */
+    use HasFactory, LogsActivity;
+
+    protected static function newFactory(): ShiftFactory
+    {
+        return ShiftFactory::new();
+    }
 
     protected $fillable = [
         'code',
