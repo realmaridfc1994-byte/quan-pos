@@ -6,6 +6,8 @@ namespace App\Domain\Ordering\Models;
 
 use App\Domain\Billing\Models\Payment;
 use App\Domain\Ordering\Enums\TableSessionStatus;
+use Database\Factories\TableSessionFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
 use Illuminate\Database\Eloquent\Model;
@@ -14,6 +16,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 final class TableSession extends Model
 {
+    /** @use HasFactory<TableSessionFactory> */
+    use HasFactory;
+
+    protected static function newFactory(): TableSessionFactory
+    {
+        return TableSessionFactory::new();
+    }
+
     protected $fillable = [
         'code',
         'shift_id',

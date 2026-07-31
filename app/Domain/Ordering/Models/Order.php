@@ -7,6 +7,8 @@ namespace App\Domain\Ordering\Models;
 use App\Domain\Catalog\Enums\Station;
 use App\Domain\Ordering\Enums\OrderStatus;
 use App\Domain\Staffing\Models\User;
+use Database\Factories\OrderFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -15,7 +17,13 @@ use Spatie\Activitylog\Traits\LogsActivity;
 
 final class Order extends Model
 {
-    use LogsActivity;
+    /** @use HasFactory<OrderFactory> */
+    use HasFactory, LogsActivity;
+
+    protected static function newFactory(): OrderFactory
+    {
+        return OrderFactory::new();
+    }
 
     protected $fillable = [
         'uuid',

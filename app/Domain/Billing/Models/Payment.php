@@ -9,6 +9,8 @@ use App\Domain\Billing\Enums\PaymentStatus;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
+use Database\Factories\PaymentFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Spatie\Activitylog\LogOptions;
@@ -16,7 +18,13 @@ use Spatie\Activitylog\Traits\LogsActivity;
 
 final class Payment extends Model
 {
-    use LogsActivity;
+    /** @use HasFactory<PaymentFactory> */
+    use HasFactory, LogsActivity;
+
+    protected static function newFactory(): PaymentFactory
+    {
+        return PaymentFactory::new();
+    }
 
     protected $fillable = [
         'uuid',

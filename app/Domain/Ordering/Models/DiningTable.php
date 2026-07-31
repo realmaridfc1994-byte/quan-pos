@@ -4,11 +4,21 @@ declare(strict_types=1);
 
 namespace App\Domain\Ordering\Models;
 
+use Database\Factories\DiningTableFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 final class DiningTable extends Model
 {
+    /** @use HasFactory<DiningTableFactory> */
+    use HasFactory;
+
+    protected static function newFactory(): DiningTableFactory
+    {
+        return DiningTableFactory::new();
+    }
+
     protected $fillable = [
         'code',
         'name',

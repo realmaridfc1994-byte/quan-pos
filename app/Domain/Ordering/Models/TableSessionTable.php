@@ -5,11 +5,21 @@ declare(strict_types=1);
 namespace App\Domain\Ordering\Models;
 
 use App\Domain\Staffing\Models\User;
+use Database\Factories\TableSessionTableFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 final class TableSessionTable extends Model
 {
+    /** @use HasFactory<TableSessionTableFactory> */
+    use HasFactory;
+
+    protected static function newFactory(): TableSessionTableFactory
+    {
+        return TableSessionTableFactory::new();
+    }
+
     protected $fillable = [
         'table_session_id',
         'dining_table_id',

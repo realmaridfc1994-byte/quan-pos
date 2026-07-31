@@ -4,11 +4,21 @@ declare(strict_types=1);
 
 namespace App\Domain\Catalog\Models;
 
+use Database\Factories\OptionFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 final class Option extends Model
 {
+    /** @use HasFactory<OptionFactory> */
+    use HasFactory;
+
+    protected static function newFactory(): OptionFactory
+    {
+        return OptionFactory::new();
+    }
+
     protected $fillable = [
         'option_group_id',
         'name',
