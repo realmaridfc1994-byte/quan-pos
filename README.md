@@ -16,6 +16,20 @@ Mở **XAMPP Control Panel**, bấm **Start** ở dòng `MySQL`. Đèn xanh là 
 
 > Quán đang dùng MariaDB có sẵn trong XAMPP ở cổng 3306, không phải MySQL Docker. Nếu sau này chuyển sang chạy bằng Docker (`docker compose up -d`), phải đổi cấu hình `.env` sang cổng 3307 — việc này cần hỏi người phụ trách kỹ thuật trước.
 
+### Trước khi chạy test lần đầu (chỉ cần làm một lần)
+
+Test tự động (`php artisan test`) dùng một database **riêng**, tách hẳn khỏi database làm việc thật (`quan_pos`) — để chạy test không bao giờ xoá mất dữ liệu quán đang bán hàng. Database riêng này phải tự tạo trước một lần duy nhất:
+
+1. Mở `http://localhost/phpmyadmin`.
+2. Bấm tab **SQL** ở trên cùng.
+3. Dán đúng câu lệnh sau rồi bấm **Thực hiện (Go)**:
+
+```sql
+CREATE DATABASE quan_pos_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
+Chỉ cần làm một lần duy nhất trên mỗi máy. Từ sau đó, `php artisan test` sẽ tự dùng database `quan_pos_test`, không đụng gì tới `quan_pos`.
+
 ### Bước 2 — Bật máy chủ web (API)
 
 ```bash
@@ -94,9 +108,9 @@ Gặp lỗi thì **chụp màn hình hoặc copy đoạn lỗi cuối file**, g�
 
 ## 5. Cách chạy kiểm tra hệ thống (phase0:check)
 
-Đây là lệnh kiểm tra tổng quát xem hệ thống có đang chạy đúng không — database, dữ liệu mẫu, các quy tắc chống lỗi... Chạy khi:
-- Vừa cài đặt xong, muốn chắc chắn mọi thứ ổn.
-- Nghi ngờ có gì đó sai nhưng không biết ở đâu.
+**Lệnh này AN TOÀN — chỉ đọc dữ liệu, không xoá gì cả.** Có thể chạy bất cứ lúc nào, kể cả giữa giờ quán đang đông khách, không ảnh hưởng đến bàn/hoá đơn/ca đang mở.
+
+Đây là lệnh kiểm tra tổng quát xem hệ thống có đang chạy đúng không — database, dữ liệu mẫu, các quy tắc chống lỗi... Chạy khi vừa cài đặt xong, muốn chắc chắn mọi thứ ổn.
 
 ```bash
 php artisan phase0:check
@@ -104,13 +118,22 @@ php artisan phase0:check
 
 Kết quả in ra từng dòng ✅ (đạt) hoặc ❌ (chưa đạt), tiếng Việt, dễ đọc. Cuối cùng có dòng tổng kết `PHASE 0 HOÀN TẤT ✅` hoặc `CÒN X MỤC CHƯA XONG ❌`.
 
-⚠️ **Lưu ý quan trọng**: lệnh này có chạy toàn bộ test tự động ở bước cuối, và bước đó sẽ **xoá sạch dữ liệu đang có rồi dựng lại database trắng** (phục vụ việc kiểm tra, không tránh được). Sau khi chạy `phase0:check` xong, nhớ chạy lại:
+### Chạy test thật (`--with-tests`) — chỉ dùng khi quán ĐÓNG CỬA
+
+⚠️ Lệnh `phase0:check` bình thường **không** đụng vào bộ test. Nếu thêm cờ `--with-tests`:
 
 ```bash
-php artisan db:seed
+php artisan phase0:check --with-tests
 ```
 
-để có lại dữ liệu mẫu (bàn, món, tài khoản).
+thì lệnh sẽ **chạy thật toàn bộ test tự động, và bước đó XOÁ SẠCH DỮ LIỆU ĐANG CÓ rồi dựng lại database trắng** để kiểm tra (bàn đang mở, hoá đơn, ca làm việc — mất hết). Vì vậy:
+
+- **Chỉ chạy khi quán đã đóng cửa**, không còn ai đang bán hàng.
+- Lệnh tự chặn nếu đang có ca làm việc mở, và tự chặn nếu không phải đang chạy trên máy phát triển.
+- Trước khi thật sự xoá, lệnh sẽ hỏi lại — phải gõ đúng chữ `XOA-DU-LIEU` mới chạy tiếp, gõ sai hoặc để trống thì huỷ, không mất gì.
+- Chạy xong nhớ `php artisan db:seed` lại để có dữ liệu mẫu.
+
+**Nếu nghi ngờ hệ thống có gì đó sai lúc đang bán hàng**: xem log trước (mục 4 bên trên), rồi gọi người phụ trách kỹ thuật — đừng tự chạy `--with-tests` giữa giờ.
 
 ---
 
@@ -121,7 +144,7 @@ Sau khi chạy `migrate:fresh --seed` hoặc `db:seed`, hệ thống có sẵn 4
 | Vai trò | Tên đăng nhập | Mật khẩu | Mã PIN |
 |---|---|---|---|
 | Chủ quán | `owner` | `password` | `1234` |
-| Quản lý | `manager` | `password` | `1234` |
+| Thu ngân | `cashier` | `password` | `1234` |
 | Phục vụ | `staff` | `password` | `1234` |
 | Bếp | `kitchen` | `password` | `1234` |
 

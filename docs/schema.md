@@ -131,7 +131,7 @@ CREATE TABLE users (
     phone               VARCHAR(20)     NOT NULL COMMENT 'Số điện thoại, dùng để đăng nhập trên máy POS',
     password            VARCHAR(255)    NOT NULL COMMENT 'Mật khẩu đã mã hoá (bcrypt)',
     pin_code            VARCHAR(255)    NULL     COMMENT 'Mã PIN 4-6 số đã mã hoá, dùng để duyệt nhanh việc hủy món',
-    role                ENUM('owner','manager','staff','kitchen') NOT NULL DEFAULT 'staff',
+    role                ENUM('owner','cashier','staff','kitchen') NOT NULL DEFAULT 'staff', -- đổi từ 'manager' sang 'cashier' ở migration 2026_08_01_000001, xem CLAUDE.md mục 1
     is_active           TINYINT(1)      NOT NULL DEFAULT 1 COMMENT 'Nghỉ việc thì tắt cờ này, KHÔNG xoá',
     remember_token      VARCHAR(100)    NULL,
     created_at          TIMESTAMP       NULL,
@@ -844,7 +844,7 @@ erDiagram
         string name "Tên nhân viên"
         string username UK
         string phone UK
-        enum role "owner/manager/staff/kitchen"
+        enum role "owner/cashier/staff/kitchen"
         bool is_active "Nghỉ việc thì tắt, không xoá"
     }
 

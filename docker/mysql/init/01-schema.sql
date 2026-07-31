@@ -21,7 +21,7 @@ CREATE TABLE users (
     phone               VARCHAR(20)     NOT NULL COMMENT 'Số điện thoại, dùng để đăng nhập trên máy POS',
     password            VARCHAR(255)    NOT NULL COMMENT 'Mật khẩu đã mã hoá (bcrypt)',
     pin_code            VARCHAR(255)    NULL     COMMENT 'Mã PIN 4-6 số đã mã hoá, dùng để duyệt nhanh việc hủy món',
-    role                ENUM('owner','manager','staff','kitchen') NOT NULL DEFAULT 'staff',
+    role                ENUM('owner','cashier','staff','kitchen') NOT NULL DEFAULT 'staff',
     is_active           TINYINT(1)      NOT NULL DEFAULT 1 COMMENT 'Nghỉ việc thì tắt cờ này, KHÔNG xoá',
     remember_token      VARCHAR(100)    NULL,
     created_at          TIMESTAMP       NULL,

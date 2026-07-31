@@ -13,7 +13,7 @@ Tài liệu nền tảng, đọc khi cần chi tiết:
 ## 1. TỔNG QUAN DỰ ÁN
 
 Hệ thống bán hàng tại quầy (POS) cho **một quán nhậu Việt Nam**, dùng trên máy tính bảng và máy tính quầy trong mạng nội bộ, không phải sản phẩm SaaS nhiều chi nhánh.
-Người dùng: chủ quán, thu ngân, phục vụ, bếp và quầy pha chế — tổng cộng dưới 10 người mỗi ca.
+Người dùng: đúng 4 vai trò thật trong code (`UserRole`) — **owner** (chủ quán, toàn quyền), **cashier** (thu ngân, đứng quầy — quán 5-15 bàn không có tầng quản lý riêng nên chính thu ngân là người duyệt giảm giá ≤20%, huỷ món đã phục vụ, void bill, xem báo cáo doanh thu), **staff** (phục vụ, gọi món/mở bàn/thu tiền, không duyệt được việc nhạy cảm), **kitchen** (bếp/quầy pha chế, chỉ đổi trạng thái món trên KDS) — tổng cộng dưới 10 người mỗi ca.
 Quy mô thật: **5–15 bàn**, một tối vài trăm dòng món, một máy in bếp và một máy in quầy. Đây là quy mô rất nhỏ với MySQL, nên **ưu tiên đúng và dễ hiểu, không tối ưu sớm**.
 Nghiệp vụ cốt lõi: mở lượt khách trên bàn (cho phép ghép bàn) → gọi món nhiều lượt, in tem xuống bếp/quầy → in tạm tính → thu tiền (mặt/chuyển khoản, thu nhiều lần) → đóng ca và đối soát tiền két.
 Phase 1 (đang làm) là bán hàng và đối soát ca. Phase 3 sẽ là trừ kho theo định lượng — schema đã chừa chỗ, **không được đụng vào trước khi tới Phase 3**.

@@ -12,6 +12,7 @@ use App\Support\Money;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Route;
 use Spatie\Activitylog\Models\Activity;
@@ -23,7 +24,7 @@ use Symfony\Component\Console\Command\Command as CommandAlias;
  */
 final class Phase0Check extends Command
 {
-    protected $signature = 'phase0:check';
+    protected $signature = 'phase0:check {--with-tests : Chạy toàn bộ test suite thật — XOÁ SẠCH dữ liệu hiện có, chỉ dùng khi quán đóng cửa}';
 
     protected $description = 'Kiểm tra toàn bộ điều kiện Phase 0 và in báo cáo tiếng Việt';
 
@@ -71,21 +72,25 @@ final class Phase0Check extends Command
         $this->kiemTraMiddlewareIdempotency();
         $this->kiemTraMoney();
         $this->kiemTraActivityLog();
-        $this->kiemTraTestSuite();
+        $this->kiemTraFileTest();
 
         $this->newLine();
-        if ($this->mucConChuaXong === []) {
+        $ketQuaChanDoan = $this->mucConChuaXong === [] ? CommandAlias::SUCCESS : CommandAlias::FAILURE;
+
+        if ($ketQuaChanDoan === CommandAlias::SUCCESS) {
             $this->line('<fg=green>PHASE 0 HOÀN TẤT ✅</>');
-
-            return CommandAlias::SUCCESS;
+        } else {
+            $this->line('<fg=red>CÒN '.count($this->mucConChuaXong).' MỤC CHƯA XONG ❌</>');
+            foreach ($this->mucConChuaXong as $muc) {
+                $this->line("  - {$muc}");
+            }
         }
 
-        $this->line('<fg=red>CÒN '.count($this->mucConChuaXong).' MỤC CHƯA XONG ❌</>');
-        foreach ($this->mucConChuaXong as $muc) {
-            $this->line("  - {$muc}");
+        if (! $this->option('with-tests')) {
+            return $ketQuaChanDoan;
         }
 
-        return CommandAlias::FAILURE;
+        return $this->chayTestNeuAnToan() ? $ketQuaChanDoan : CommandAlias::FAILURE;
     }
 
     private function baoOk(string $noiDung): void
@@ -291,11 +296,52 @@ final class Phase0Check extends Command
         }
     }
 
-    private function kiemTraTestSuite(): void
+    /**
+     * Chỉ ĐẾM file, không chạy gì cả — một lệnh chẩn đoán không bao giờ được phép
+     * phá dữ liệu. Muốn chạy test thật thì gõ thêm --with-tests, có rào chắn riêng.
+     */
+    private function kiemTraFileTest(): void
+    {
+        $soFile = collect(File::allFiles(base_path('tests')))
+            ->filter(fn ($file) => $file->getExtension() === 'php')
+            ->count();
+
+        $this->baoOk(
+            "Có {$soFile} file test trong tests/ — chạy `php artisan test` ".
+            '(hoặc `php artisan phase0:check --with-tests` khi quán đang đóng cửa) để kiểm chứng thật.'
+        );
+    }
+
+    /**
+     * Rào chắn ba lớp trước khi cho phép chạy Pest thật: đúng môi trường, không có
+     * ca đang mở, và người vận hành phải gõ đúng chữ xác nhận — vì test dùng
+     * RefreshDatabase, chạy nhầm giữa giờ bán là mất trắng bàn/hoá đơn/ca đang mở.
+     */
+    private function chayTestNeuAnToan(): bool
     {
         $this->newLine();
-        $this->line('<fg=yellow>Đang chạy toàn bộ test suite (Pest)... việc này sẽ XOÁ SẠCH VÀ NẠP LẠI schema database vì test dùng RefreshDatabase.</>');
-        $this->line('<fg=yellow>Sau khi chạy xong, nhớ chạy `php artisan db:seed` để có lại dữ liệu mẫu.</>');
+        $this->line('<fg=yellow>--with-tests: chuẩn bị chạy toàn bộ test suite thật.</>');
+
+        if (! in_array(app()->environment(), ['local', 'testing'], true)) {
+            $this->line('<fg=red>❌ Môi trường hiện tại là "'.app()->environment().'" — không phải "local" hay "testing". Không chạy test ở đây.</>');
+
+            return false;
+        }
+
+        if (DB::table('shifts')->where('status', 'open')->exists()) {
+            $this->line('<fg=red>❌ Đang có ca làm việc mở. Không chạy test khi quán đang bán hàng.</>');
+
+            return false;
+        }
+
+        $this->line('<fg=red>Lệnh này sẽ XOÁ SẠCH VÀ NẠP LẠI schema database (RefreshDatabase). Toàn bộ bàn, hoá đơn, ca hiện có sẽ MẤT.</>');
+        $xacNhan = $this->ask('Gõ chính xác XOA-DU-LIEU để tiếp tục (gõ sai hoặc để trống sẽ huỷ)');
+
+        if ($xacNhan !== 'XOA-DU-LIEU') {
+            $this->line('Đã huỷ, không chạy test.');
+
+            return false;
+        }
 
         $ketQua = Process::timeout(600)->run(base_path('vendor/bin/pest').' --colors=never');
 
@@ -308,10 +354,15 @@ final class Phase0Check extends Command
         }
 
         if ($ketQua->successful()) {
-            $this->baoOk("Toàn bộ test suite PASS. {$dongTomTat}");
-        } else {
-            $this->baoFail("Test suite có test FAIL. {$dongTomTat}");
-            $this->line($output);
+            $this->line("<fg=green>✅ Toàn bộ test suite PASS. {$dongTomTat}</>");
+            $this->line('Nhớ chạy `php artisan db:seed` để có lại dữ liệu mẫu.');
+
+            return true;
         }
+
+        $this->line("<fg=red>❌ Test suite có test FAIL. {$dongTomTat}</>");
+        $this->line($output);
+
+        return false;
     }
 }

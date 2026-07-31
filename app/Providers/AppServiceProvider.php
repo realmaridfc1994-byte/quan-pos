@@ -50,7 +50,7 @@ class AppServiceProvider extends ServiceProvider
 
         Gate::define(
             'view-revenue-report',
-            fn (User $user): bool => in_array($user->role, [UserRole::Owner, UserRole::Manager], true)
+            fn (User $user): bool => in_array($user->role, [UserRole::Owner, UserRole::Cashier], true)
         );
 
         Gate::define(

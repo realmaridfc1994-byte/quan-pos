@@ -41,9 +41,9 @@ class UserFactory extends Factory
         return $this->state(fn (array $attributes) => ['role' => UserRole::Owner]);
     }
 
-    public function manager(): static
+    public function cashier(): static
     {
-        return $this->state(fn (array $attributes) => ['role' => UserRole::Manager]);
+        return $this->state(fn (array $attributes) => ['role' => UserRole::Cashier]);
     }
 
     public function staff(): static

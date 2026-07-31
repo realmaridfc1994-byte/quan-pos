@@ -7,7 +7,7 @@ namespace App\Domain\Staffing\Enums;
 enum UserRole: string
 {
     case Owner = 'owner';
-    case Manager = 'manager';
+    case Cashier = 'cashier';
     case Staff = 'staff';
     case Kitchen = 'kitchen';
 
@@ -15,7 +15,7 @@ enum UserRole: string
     {
         return match ($this) {
             self::Owner => 'Chủ quán',
-            self::Manager => 'Quản lý',
+            self::Cashier => 'Thu ngân',
             self::Staff => 'Nhân viên',
             self::Kitchen => 'Bếp',
         };

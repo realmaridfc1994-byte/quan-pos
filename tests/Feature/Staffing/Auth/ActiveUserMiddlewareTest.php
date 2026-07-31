@@ -7,7 +7,7 @@ use App\Domain\Staffing\Models\User;
 use function Pest\Laravel\withHeader;
 
 it('user bị vô hiệu hoá giữa chừng thì token cũ bị chặn ngay', function () {
-    $user = User::factory()->manager()->withPin('1234')->create();
+    $user = User::factory()->cashier()->withPin('1234')->create();
     $token = $user->createToken('pos-app')->plainTextToken;
 
     // Chủ quán tắt cờ is_active sau khi nhân viên đã đăng nhập từ trước.

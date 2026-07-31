@@ -12,6 +12,6 @@ final class OrderPolicy
     /** Gọi món — gửi phiếu xuống bếp/quầy. */
     public function create(User $user): bool
     {
-        return in_array($user->role, [UserRole::Owner, UserRole::Manager, UserRole::Staff], true);
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
     }
 }

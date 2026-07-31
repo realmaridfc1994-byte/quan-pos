@@ -13,7 +13,7 @@ USE quan_pos;
 -- --- Nhân viên -------------------------------------------------------------
 INSERT INTO users (name, username, phone, password, role, is_active, created_at, updated_at) VALUES
 ('Chủ quán',      'chuquan', '0900000001', '$2y$12$0BSKB.Ov0Uu55w06ktRfQOhBjWZL2rvuegqDkmpp0MTRTZWaDKk9K', 'owner',   1, NOW(), NOW()),
-('Quản lý Hạnh',  'hanh',    '0900000002', '$2y$12$0BSKB.Ov0Uu55w06ktRfQOhBjWZL2rvuegqDkmpp0MTRTZWaDKk9K', 'manager', 1, NOW(), NOW()),
+('Thu ngân Hạnh', 'hanh',    '0900000002', '$2y$12$0BSKB.Ov0Uu55w06ktRfQOhBjWZL2rvuegqDkmpp0MTRTZWaDKk9K', 'cashier', 1, NOW(), NOW()),
 ('Phục vụ Nam',   'nam',     '0900000003', '$2y$12$0BSKB.Ov0Uu55w06ktRfQOhBjWZL2rvuegqDkmpp0MTRTZWaDKk9K', 'staff',   1, NOW(), NOW()),
 ('Phục vụ Lan',   'lan',     '0900000004', '$2y$12$0BSKB.Ov0Uu55w06ktRfQOhBjWZL2rvuegqDkmpp0MTRTZWaDKk9K', 'staff',   1, NOW(), NOW()),
 ('Bếp trưởng',    'bep',     '0900000005', '$2y$12$0BSKB.Ov0Uu55w06ktRfQOhBjWZL2rvuegqDkmpp0MTRTZWaDKk9K', 'kitchen', 1, NOW(), NOW());

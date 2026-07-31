@@ -4,7 +4,7 @@
 > **Chỉ chủ dự án được sửa file này.** Claude Code đọc, không ghi.
 
 ```
-BUOC_DANG_MO = 3
+BUOC_DANG_MO = 4
 ```
 
 **Bước 3 — Khởi tạo dự án.** Được phép: tạo project Laravel 12, cấu hình `.env`

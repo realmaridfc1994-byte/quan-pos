@@ -11,7 +11,10 @@ Route::prefix('v1')->group(function (): void {
 
         Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
             Route::post('logout', [AuthController::class, 'logout']);
-            Route::post('pin-verify', [AuthController::class, 'pinVerify']);
+
+            // Chống dò PIN bằng cách thử vét cạn: tối đa 5 lần/phút và 20 lần/giờ theo user gọi.
+            Route::post('pin-verify', [AuthController::class, 'pinVerify'])
+                ->middleware(['throttle:5,1,pin-verify-minute', 'throttle:20,60,pin-verify-hour']);
         });
     });
 });

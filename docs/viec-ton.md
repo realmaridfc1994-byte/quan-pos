@@ -22,3 +22,5 @@ Ví dụ:
 ## Danh sách
 
 <!-- Claude Code thêm dòng mới ở dưới đây -->
+[Phase 4] Máy đặt ở quán: đặt APP_ENV=production, APP_DEBUG=false trong .env — 31/07
+[Phase 1] option_groups chưa có ràng buộc chống trùng (name, product_id, category_id) — cần cột sinh tự động như uq_tst_one_session_per_table. Hiện chỉ dựa vào quy ước trong seeder — 31/07

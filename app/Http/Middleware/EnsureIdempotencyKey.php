@@ -6,6 +6,7 @@ namespace App\Http\Middleware;
 
 use App\Exceptions\IdempotencyConflictException;
 use App\Exceptions\IdempotencyKeyRequiredException;
+use App\Exceptions\IdempotencyPayloadMismatchException;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -24,7 +25,10 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class EnsureIdempotencyKey
 {
-    private const TTL_HOURS = 24;
+    /** Khoá "đang xử lý" tự hết hạn nhanh — tiến trình chết đột ngột (timeout, mất kết nối) không kẹt khoá 24 giờ. */
+    private const PROCESSING_TTL_SECONDS = 60;
+
+    private const COMPLETED_TTL_HOURS = 24;
 
     public function handle(Request $request, Closure $next): Response
     {
@@ -40,12 +44,25 @@ final class EnsureIdempotencyKey
 
         $cacheKey = $this->cacheKeyFor($idempotencyKey, $request);
         $store = Cache::store('database');
+        $bodyHash = hash('sha256', (string) $request->getContent());
 
-        $claimed = $store->add($cacheKey, ['status' => 'processing'], now()->addHours(self::TTL_HOURS));
+        $claimed = $store->add(
+            $cacheKey,
+            ['status' => 'processing', 'body_hash' => $bodyHash],
+            now()->addSeconds(self::PROCESSING_TTL_SECONDS)
+        );
 
         if (! $claimed) {
-            /** @var array{status: string, http_status?: int, headers?: array<string, string>, body?: string}|null $existing */
+            /** @var array{status: string, body_hash?: string, http_status?: int, headers?: array<string, string>, body?: string}|null $existing */
             $existing = $store->get($cacheKey);
+
+            // Cùng mã nhưng nội dung khác lần trước — không được âm thầm thay thế
+            // hay bỏ qua request, đặc biệt nguy hiểm với endpoint thu tiền.
+            if ($existing !== null && ($existing['body_hash'] ?? null) !== $bodyHash) {
+                throw new IdempotencyPayloadMismatchException(
+                    'Mã chống trùng này đã dùng cho một yêu cầu khác. Vui lòng thử lại.'
+                );
+            }
 
             if ($existing === null || $existing['status'] === 'processing') {
                 throw new IdempotencyConflictException('Yêu cầu trước đó với cùng mã đang được xử lý.');
@@ -59,17 +76,26 @@ final class EnsureIdempotencyKey
             return $replay;
         }
 
-        $response = $next($request);
+        try {
+            $response = $next($request);
+        } catch (\Throwable $e) {
+            // Bất kỳ lỗi nào bay ra (validation, domain, lỗi hệ thống...) đều coi như
+            // "chưa hoàn tất" — nhả khoá ngay để gửi lại cùng key được, không kẹt 24 giờ.
+            $store->forget($cacheKey);
+
+            throw $e;
+        }
 
         if ($response->isSuccessful()) {
             $store->put($cacheKey, [
                 'status' => 'completed',
+                'body_hash' => $bodyHash,
                 'http_status' => $response->getStatusCode(),
                 'headers' => [
                     'Content-Type' => $response->headers->get('Content-Type', 'application/json'),
                 ],
                 'body' => $response->getContent(),
-            ], now()->addHours(self::TTL_HOURS));
+            ], now()->addHours(self::COMPLETED_TTL_HOURS));
         } else {
             $store->forget($cacheKey);
         }

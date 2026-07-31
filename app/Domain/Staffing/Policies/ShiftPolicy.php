@@ -12,14 +12,14 @@ final class ShiftPolicy
 {
     /**
      * Đóng ca. Ai cũng đóng được ca của chính mình; đóng ca của người khác
-     * thì chỉ chủ quán/quản lý.
+     * thì chỉ chủ quán/thu ngân.
      */
     public function close(User $user, Shift $shift): bool
     {
         if ($shift->opened_by_user_id === $user->id) {
-            return in_array($user->role, [UserRole::Owner, UserRole::Manager, UserRole::Staff], true);
+            return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
         }
 
-        return in_array($user->role, [UserRole::Owner, UserRole::Manager], true);
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier], true);
     }
 }

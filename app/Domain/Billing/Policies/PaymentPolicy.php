@@ -12,6 +12,6 @@ final class PaymentPolicy
     /** Thu tiền cho một lượt khách. */
     public function create(User $user): bool
     {
-        return in_array($user->role, [UserRole::Owner, UserRole::Manager, UserRole::Staff], true);
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
     }
 }

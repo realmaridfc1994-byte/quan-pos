@@ -6,7 +6,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Staffing\Actions\AuthenticateUser;
 use App\Domain\Staffing\Actions\RevokeCurrentToken;
-use App\Domain\Staffing\Actions\VerifyManagerPin;
+use App\Domain\Staffing\Actions\VerifyApproverPin;
 use App\Domain\Staffing\DTO\LoginData;
 use App\Domain\Staffing\DTO\LogoutData;
 use App\Domain\Staffing\DTO\PinVerifyData;
@@ -41,7 +41,7 @@ final class AuthController extends Controller
     }
 
     /** POST /api/v1/auth/pin-verify */
-    public function pinVerify(PinVerifyRequest $request, VerifyManagerPin $action): JsonResponse
+    public function pinVerify(PinVerifyRequest $request, VerifyApproverPin $action): JsonResponse
     {
         $approver = $action->handle(PinVerifyData::fromRequest($request));
 

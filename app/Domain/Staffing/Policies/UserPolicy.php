@@ -11,16 +11,16 @@ final class UserPolicy
 {
     public function viewAny(User $user): bool
     {
-        return in_array($user->role, [UserRole::Owner, UserRole::Manager], true);
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier], true);
     }
 
     public function create(User $user): bool
     {
-        return in_array($user->role, [UserRole::Owner, UserRole::Manager], true);
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier], true);
     }
 
     public function update(User $user): bool
     {
-        return in_array($user->role, [UserRole::Owner, UserRole::Manager], true);
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier], true);
     }
 }

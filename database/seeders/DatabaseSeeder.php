@@ -16,78 +16,82 @@ use App\Domain\Staffing\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
+/**
+ * Chạy lại được nhiều lần, không xoá gì — chỉ updateOrCreate() theo cột định
+ * danh ổn định. KHÔNG được đụng 8 bảng giao dịch (orders, order_items,
+ * order_item_options, payments, shifts, table_sessions, table_session_tables,
+ * cash_movements): seeder này chỉ dựng danh mục món/bàn và 4 tài khoản mẫu,
+ * chạy lại giữa giờ quán đang bán không được làm mất một dòng giao dịch nào.
+ */
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
         // ──────────────────────────────────────────────────────────────
-        // 1. NGƯỜI DÙNG (4 người)
+        // 1. NGƯỜI DÙNG (4 người) — khoá theo phone (UNIQUE thật)
         // ──────────────────────────────────────────────────────────────
-        User::query()->where('phone', '0900000001')->delete();
-        User::query()->where('phone', '0900000002')->delete();
-        User::query()->where('phone', '0900000003')->delete();
-        User::query()->where('phone', '0900000004')->delete();
+        $nhanVien = [
+            ['name' => 'Chủ quán', 'username' => 'owner', 'phone' => '0900000001', 'role' => UserRole::Owner],
+            ['name' => 'Thu ngân', 'username' => 'cashier', 'phone' => '0900000002', 'role' => UserRole::Cashier],
+            ['name' => 'Phục vụ', 'username' => 'staff', 'phone' => '0900000003', 'role' => UserRole::Staff],
+            ['name' => 'Bếp', 'username' => 'kitchen', 'phone' => '0900000004', 'role' => UserRole::Kitchen],
+        ];
 
-        User::factory()->create([
-            'name' => 'Chủ quán',
-            'username' => 'owner',
-            'phone' => '0900000001',
-            'password' => Hash::make('password'),
-            'pin_code' => Hash::make('1234'),
-            'role' => UserRole::Owner,
-            'is_active' => true,
-        ]);
-
-        User::factory()->create([
-            'name' => 'Quản lý',
-            'username' => 'manager',
-            'phone' => '0900000002',
-            'password' => Hash::make('password'),
-            'pin_code' => Hash::make('1234'),
-            'role' => UserRole::Manager,
-            'is_active' => true,
-        ]);
-
-        User::factory()->create([
-            'name' => 'Phục vụ',
-            'username' => 'staff',
-            'phone' => '0900000003',
-            'password' => Hash::make('password'),
-            'pin_code' => Hash::make('1234'),
-            'role' => UserRole::Staff,
-            'is_active' => true,
-        ]);
-
-        User::factory()->create([
-            'name' => 'Bếp',
-            'username' => 'kitchen',
-            'phone' => '0900000004',
-            'password' => Hash::make('password'),
-            'pin_code' => Hash::make('1234'),
-            'role' => UserRole::Kitchen,
-            'is_active' => true,
-        ]);
+        foreach ($nhanVien as $nv) {
+            User::query()->updateOrCreate(
+                ['phone' => $nv['phone']],
+                [
+                    'name' => $nv['name'],
+                    'username' => $nv['username'],
+                    'password' => Hash::make('password'),
+                    'pin_code' => Hash::make('1234'),
+                    'role' => $nv['role'],
+                    'is_active' => true,
+                ]
+            );
+        }
 
         // ──────────────────────────────────────────────────────────────
-        // 2. BÀN (12 bàn)
+        // 2. BÀN (12 bàn) — khoá theo code (UNIQUE thật)
         // ──────────────────────────────────────────────────────────────
-        DiningTable::query()->delete();
+        $ban = [];
 
-        // 8 bàn trong nhà (B01-B08), 4 chỗ
         for ($i = 1; $i <= 8; $i++) {
-            DiningTable::factory()->indoorTable($i)->create();
+            $ban[] = [
+                'code' => sprintf('B%02d', $i),
+                'name' => "Bàn {$i}",
+                'area' => 'Trong nhà',
+                'seats' => 4,
+                'sort_order' => $i,
+            ];
         }
 
-        // 4 bàn sân (S01-S04), 6 chỗ
         for ($i = 1; $i <= 4; $i++) {
-            DiningTable::factory()->outsideTable($i)->create();
+            $ban[] = [
+                'code' => sprintf('S%02d', $i),
+                'name' => "Bàn sân {$i}",
+                'area' => 'Sân',
+                'seats' => 6,
+                'sort_order' => 8 + $i,
+            ];
+        }
+
+        foreach ($ban as $b) {
+            DiningTable::query()->updateOrCreate(
+                ['code' => $b['code']],
+                [
+                    'name' => $b['name'],
+                    'area' => $b['area'],
+                    'seats' => $b['seats'],
+                    'sort_order' => $b['sort_order'],
+                    'is_active' => true,
+                ]
+            );
         }
 
         // ──────────────────────────────────────────────────────────────
-        // 3. NHÓM MÓN (8 nhóm)
+        // 3. NHÓM MÓN (8 nhóm) — khoá theo name (UNIQUE thật)
         // ──────────────────────────────────────────────────────────────
-        Category::query()->delete();
-
         $categories = [
             ['name' => 'Bia & nước', 'station' => Station::Bar, 'sort_order' => 1],
             ['name' => 'Đồ nhắm', 'station' => Station::Kitchen, 'sort_order' => 2],
@@ -101,21 +105,18 @@ class DatabaseSeeder extends Seeder
 
         $categoryMap = [];
         foreach ($categories as $cat) {
-            $categoryMap[$cat['name']] = Category::factory()->create([
-                'name' => $cat['name'],
-                'station' => $cat['station'],
-                'sort_order' => $cat['sort_order'],
-            ]);
+            $categoryMap[$cat['name']] = Category::query()->updateOrCreate(
+                ['name' => $cat['name']],
+                [
+                    'station' => $cat['station'],
+                    'sort_order' => $cat['sort_order'],
+                ]
+            );
         }
 
         // ──────────────────────────────────────────────────────────────
-        // 4. MÓN (60 món)
+        // 4. MÓN (60 món) — khoá theo code (UNIQUE thật)
         // ──────────────────────────────────────────────────────────────
-        Product::query()->delete();
-        ProductVariant::query()->delete();
-        OptionGroup::query()->delete();
-        Option::query()->delete();
-
         $products = [
             // Bia & nước (8 món)
             ['name' => 'Bia Tiger', 'category' => 'Bia & nước', 'code' => 'TIGER', 'cost' => 8000, 'hasOptions' => true],
@@ -195,49 +196,48 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($products as $productData) {
-            $product = Product::factory()->create([
-                'category_id' => $categoryMap[$productData['category']]->id,
-                'name' => $productData['name'],
-                'code' => $productData['code'],
-                'sort_order' => fake()->numberBetween(0, 100),
-            ]);
+            $product = Product::query()->updateOrCreate(
+                ['code' => $productData['code']],
+                [
+                    'category_id' => $categoryMap[$productData['category']]->id,
+                    'name' => $productData['name'],
+                    'sort_order' => fake()->numberBetween(0, 100),
+                ]
+            );
 
-            // Tạo biến thể mặc định với giá
+            // Biến thể mặc định — khoá theo (product_id, name), UNIQUE thật.
             $price = $productData['cost'] + fake()->numberBetween(5000, 15000);
-            ProductVariant::factory()->create([
-                'product_id' => $product->id,
-                'name' => 'Mặc định',
-                'price' => $price,
-                'is_default' => true,
-                'is_active' => true,
-            ]);
+            ProductVariant::query()->updateOrCreate(
+                ['product_id' => $product->id, 'name' => 'Mặc định'],
+                [
+                    'price' => $price,
+                    'is_default' => true,
+                    'is_active' => true,
+                ]
+            );
 
-            // Nếu là bia, tạo thêm biến thể lon/chai/thùng
+            // Nếu là bia, thêm biến thể lon/chai/thùng
             if (str_contains($product->code, 'TIGER') || str_contains($product->code, 'HEIN') || str_contains($product->code, 'SGN')) {
-                ProductVariant::factory()->create([
-                    'product_id' => $product->id,
-                    'name' => 'Lon',
-                    'price' => 25000,
-                    'is_default' => false,
-                ]);
-                ProductVariant::factory()->create([
-                    'product_id' => $product->id,
-                    'name' => 'Chai',
-                    'price' => 27000,
-                    'is_default' => false,
-                ]);
-                ProductVariant::factory()->create([
-                    'product_id' => $product->id,
-                    'name' => 'Thùng',
-                    'price' => 550000,
-                    'is_default' => false,
-                    'tracks_inventory' => true,
-                    'stock_unit' => 'lon',
-                    'stock_factor' => 24,
-                ]);
+                ProductVariant::query()->updateOrCreate(
+                    ['product_id' => $product->id, 'name' => 'Lon'],
+                    ['price' => 25000, 'is_default' => false]
+                );
+                ProductVariant::query()->updateOrCreate(
+                    ['product_id' => $product->id, 'name' => 'Chai'],
+                    ['price' => 27000, 'is_default' => false]
+                );
+                ProductVariant::query()->updateOrCreate(
+                    ['product_id' => $product->id, 'name' => 'Thùng'],
+                    [
+                        'price' => 550000,
+                        'is_default' => false,
+                        'tracks_inventory' => true,
+                        'stock_unit' => 'lon',
+                        'stock_factor' => 24,
+                    ]
+                );
             }
 
-            // Tạo tùy chọn cho một số món
             if ($productData['hasOptions']) {
                 $this->createOptionsForProduct($product);
             }
@@ -248,122 +248,85 @@ class DatabaseSeeder extends Seeder
     {
         // Nhóm tùy chọn "Độ cay"
         if (in_array($product->code, ['GANUOI', 'THBO', 'TOMNUONG', 'CANUONG', 'XIENTC', 'CANHGA', 'MUCNUONG', 'COMCHIEN', 'PHO'])) {
-            $spicyGroup = OptionGroup::factory()->forProduct($product)->create([
-                'name' => 'Độ cay',
+            $spicyGroup = $this->updateOrCreateOptionGroup('Độ cay', $product, [
                 'is_required' => false,
                 'max_select' => 1,
             ]);
 
-            Option::factory()->create([
-                'option_group_id' => $spicyGroup->id,
-                'name' => 'Không cay',
-                'price_delta' => 0,
-            ]);
-            Option::factory()->create([
-                'option_group_id' => $spicyGroup->id,
-                'name' => 'Ít cay',
-                'price_delta' => 0,
-            ]);
-            Option::factory()->create([
-                'option_group_id' => $spicyGroup->id,
-                'name' => 'Cay vừa',
-                'price_delta' => 0,
-            ]);
-            Option::factory()->create([
-                'option_group_id' => $spicyGroup->id,
-                'name' => 'Cay',
-                'price_delta' => 0,
-            ]);
+            $this->updateOrCreateOption($spicyGroup, 'Không cay', 0);
+            $this->updateOrCreateOption($spicyGroup, 'Ít cay', 0);
+            $this->updateOrCreateOption($spicyGroup, 'Cay vừa', 0);
+            $this->updateOrCreateOption($spicyGroup, 'Cay', 0);
         }
 
         // Nhóm tùy chọn "Đá" cho nước uống
         if (in_array($product->code, ['NCNGOT', 'CADENM'])) {
-            $iceGroup = OptionGroup::factory()->forProduct($product)->create([
-                'name' => 'Đá',
+            $iceGroup = $this->updateOrCreateOptionGroup('Đá', $product, [
                 'is_required' => false,
                 'max_select' => 1,
             ]);
 
-            Option::factory()->create([
-                'option_group_id' => $iceGroup->id,
-                'name' => 'Ít đá',
-                'price_delta' => 0,
-            ]);
-            Option::factory()->create([
-                'option_group_id' => $iceGroup->id,
-                'name' => 'Nhiều đá',
-                'price_delta' => 0,
-            ]);
-            Option::factory()->create([
-                'option_group_id' => $iceGroup->id,
-                'name' => 'Không đá',
-                'price_delta' => 0,
-            ]);
+            $this->updateOrCreateOption($iceGroup, 'Ít đá', 0);
+            $this->updateOrCreateOption($iceGroup, 'Nhiều đá', 0);
+            $this->updateOrCreateOption($iceGroup, 'Không đá', 0);
         }
 
         // Nhóm tùy chọn "Đủ bộ" cho gà luộc
         if ($product->code === 'GALUOC') {
-            $setGroup = OptionGroup::factory()->forProduct($product)->create([
-                'name' => 'Đủ bộ',
+            $setGroup = $this->updateOrCreateOptionGroup('Đủ bộ', $product, [
                 'is_required' => false,
                 'max_select' => 1,
             ]);
 
-            Option::factory()->create([
-                'option_group_id' => $setGroup->id,
-                'name' => 'Có nước dùng',
-                'price_delta' => 0,
-            ]);
-            Option::factory()->create([
-                'option_group_id' => $setGroup->id,
-                'name' => 'Không nước dùng',
-                'price_delta' => 0,
-            ]);
+            $this->updateOrCreateOption($setGroup, 'Có nước dùng', 0);
+            $this->updateOrCreateOption($setGroup, 'Không nước dùng', 0);
         }
 
         // Nhóm tùy chọn "Gia vị" cho bia
         if (in_array($product->code, ['TIGER', 'HEIN', 'SGN'])) {
-            $seasoningGroup = OptionGroup::factory()->forProduct($product)->create([
-                'name' => 'Gia vị',
+            $seasoningGroup = $this->updateOrCreateOptionGroup('Gia vị', $product, [
                 'is_required' => false,
                 'max_select' => 1,
             ]);
 
-            Option::factory()->create([
-                'option_group_id' => $seasoningGroup->id,
-                'name' => 'Muối dưa chuột',
-                'price_delta' => 0,
-            ]);
-            Option::factory()->create([
-                'option_group_id' => $seasoningGroup->id,
-                'name' => 'Muối xổi cay',
-                'price_delta' => 0,
-            ]);
+            $this->updateOrCreateOption($seasoningGroup, 'Muối dưa chuột', 0);
+            $this->updateOrCreateOption($seasoningGroup, 'Muối xổi cay', 0);
         }
 
         // Nhóm tùy chọn "Thêm thịt" cho cơm
         if (in_array($product->code, ['COMCHIEN', 'PHO', 'BUNBO', 'MIXAO', 'BANHMI'])) {
-            $meatGroup = OptionGroup::factory()->forProduct($product)->create([
-                'name' => 'Thêm thịt',
+            $meatGroup = $this->updateOrCreateOptionGroup('Thêm thịt', $product, [
                 'is_required' => false,
                 'max_select' => 1,
             ]);
 
-            Option::factory()->create([
-                'option_group_id' => $meatGroup->id,
-                'name' => 'Thêm gà',
-                'price_delta' => 5000,
-            ]);
-            Option::factory()->create([
-                'option_group_id' => $meatGroup->id,
-                'name' => 'Thêm bò',
-                'price_delta' => 8000,
-            ]);
-            Option::factory()->create([
-                'option_group_id' => $meatGroup->id,
-                'name' => 'Thêm tôm',
-                'price_delta' => 10000,
-            ]);
+            $this->updateOrCreateOption($meatGroup, 'Thêm gà', 5000);
+            $this->updateOrCreateOption($meatGroup, 'Thêm bò', 8000);
+            $this->updateOrCreateOption($meatGroup, 'Thêm tôm', 10000);
         }
+    }
+
+    /**
+     * Khoá theo (name, product_id, category_id) — đúng ba cột trong ràng buộc
+     * ck_option_groups_scope. Không được khoá theo mỗi "name": nhiều món khác
+     * nhau dùng chung tên nhóm (ví dụ "Độ cay" ở 9 món) — khoá theo mỗi name
+     * sẽ gộp nhầm các nhóm của các món khác nhau thành một bản ghi.
+     *
+     * @param  array<string, mixed>  $thuocTinh
+     */
+    private function updateOrCreateOptionGroup(string $ten, Product $product, array $thuocTinh): OptionGroup
+    {
+        return OptionGroup::query()->updateOrCreate(
+            ['name' => $ten, 'product_id' => $product->id, 'category_id' => null],
+            $thuocTinh
+        );
+    }
+
+    private function updateOrCreateOption(OptionGroup $nhom, string $ten, int $priceDelta): void
+    {
+        Option::query()->updateOrCreate(
+            ['option_group_id' => $nhom->id, 'name' => $ten],
+            ['price_delta' => $priceDelta]
+        );
     }
 }
