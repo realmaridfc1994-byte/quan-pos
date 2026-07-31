@@ -1,8 +1,16 @@
 # THIẾT KẾ CƠ SỞ DỮ LIỆU — HỆ THỐNG POS QUÁN NHẬU
 
-Phiên bản: 1.0 — Phase 1
-Nền tảng: Laravel 12 · MySQL 8 · InnoDB · `utf8mb4_0900_ai_ci`
-Tiền tệ: VND, lưu bằng số nguyên đơn vị **đồng** (`BIGINT UNSIGNED`)
+> **MÔI TRƯỜNG — ĐỌC TRƯỚC KHI DỰNG DATABASE**
+>
+> Thiết kế này chạy trên **MariaDB 10.4.32** đi kèm **XAMPP 8.2.12**, cổng 3306. Không cần cài thêm database nào.
+>
+> **Một thay đổi so với bản gốc:** bảng mã đổi từ `utf8mb4_0900_ai_ci` (chỉ MySQL 8 có) sang **`utf8mb4_unicode_ci`**. Hành vi so sánh tiếng Việt giống nhau — không phân biệt hoa thường, không phân biệt dấu. Cấu trúc bảng, khoá, ràng buộc **giữ nguyên 100%**.
+>
+> **ĐÃ KIỂM CHỨNG TRÊN MARIADB 10.4.32 — cả 4 phép thử ĐẠT.** Chi tiết ở phụ lục cuối tài liệu. Chốt `uq_tst_one_session_per_table`, chốt `uq_shifts_only_one_open` và toàn bộ ràng buộc `CHECK` đều chặn đúng như trên MySQL 8.
+>
+> **Một khác biệt về cách báo lỗi, xem bất biến M5:** khi ai đó cố nhập tay đè lên cột máy tự tính, MySQL 8 từ chối cả câu lệnh, còn MariaDB nhận câu lệnh nhưng **vứt bỏ giá trị gian lận** rồi tự tính lại đúng, chỉ kèm cảnh báo `#1906`. Dữ liệu được bảo vệ như nhau, nhưng lập trình viên không nghe thấy tiếng hét — nên phải bù bằng hai luật ở `CLAUDE.md` mục 4 và mục 7.
+>
+> **Khi đưa vào chạy thật ở quán:** XAMPP tự tuyên bố chỉ dành cho phát triển, và MariaDB 10.4 đã hết hạn hỗ trợ. Máy chạy thật ở quán nên dùng MySQL 8 hoặc MariaDB bản LTS còn hỗ trợ. Đây là việc của Phase 4, ghi lại để không quên.
 
 ---
 
@@ -108,7 +116,7 @@ Khi làm Phase 3, chỉ cần thêm các bảng mới (`ingredients`, `recipes`,
 ## PHẦN 3 — DDL ĐẦY ĐỦ
 
 ```sql
-SET NAMES utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- =====================================================================
@@ -130,7 +138,7 @@ CREATE TABLE users (
     PRIMARY KEY (id),
     UNIQUE KEY uq_users_username (username),
     KEY idx_users_active_role (is_active, role)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 2. CA LÀM VIỆC
 CREATE TABLE shifts (
@@ -167,7 +175,7 @@ CREATE TABLE shifts (
      OR (status = 'closed' AND closed_at IS NOT NULL AND counted_cash IS NOT NULL
                            AND closed_by_user_id IS NOT NULL AND expected_cash IS NOT NULL)
     )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 3. THU CHI TIỀN MẶT NGOÀI BÁN HÀNG
 CREATE TABLE cash_movements (
@@ -185,7 +193,7 @@ CREATE TABLE cash_movements (
     CONSTRAINT fk_cash_movements_shift   FOREIGN KEY (shift_id)           REFERENCES shifts (id) ON DELETE RESTRICT,
     CONSTRAINT fk_cash_movements_user    FOREIGN KEY (created_by_user_id) REFERENCES users (id)  ON DELETE RESTRICT,
     CONSTRAINT ck_cash_movements_amount  CHECK (amount > 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================================
 -- NHÓM B — KHÔNG GIAN QUÁN
@@ -205,7 +213,7 @@ CREATE TABLE dining_tables (
     PRIMARY KEY (id),
     UNIQUE KEY uq_dining_tables_code (code),
     KEY idx_dining_tables_layout (is_active, area, sort_order)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 5. LƯỢT KHÁCH  (TRÁI TIM HỆ THỐNG)
 CREATE TABLE table_sessions (
@@ -261,7 +269,7 @@ CREATE TABLE table_sessions (
     CONSTRAINT ck_table_sessions_discount_reason CHECK (discount_amount = 0 OR discount_reason IS NOT NULL),
     CONSTRAINT ck_table_sessions_void     CHECK (status <> 'void' OR (voided_at IS NOT NULL AND void_reason IS NOT NULL)),
     CONSTRAINT ck_table_sessions_closed   CHECK (status <> 'closed' OR (closed_at IS NOT NULL AND paid_amount >= total_amount))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 6. LƯỢT KHÁCH ĐANG CHIẾM BÀN NÀO  (GHÉP BÀN + CHỐNG MỞ TRÙNG)
 CREATE TABLE table_session_tables (
@@ -290,7 +298,7 @@ CREATE TABLE table_session_tables (
     CONSTRAINT fk_tst_table   FOREIGN KEY (dining_table_id)    REFERENCES dining_tables (id)  ON DELETE RESTRICT,
     CONSTRAINT fk_tst_user    FOREIGN KEY (attached_by_user_id) REFERENCES users (id)         ON DELETE RESTRICT,
     CONSTRAINT ck_tst_time    CHECK (detached_at IS NULL OR detached_at >= attached_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================================
 -- NHÓM C — THỰC ĐƠN
@@ -309,7 +317,7 @@ CREATE TABLE categories (
     PRIMARY KEY (id),
     UNIQUE KEY uq_categories_name (name),
     KEY idx_categories_menu (is_active, sort_order)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 8. MÓN
 CREATE TABLE products (
@@ -330,7 +338,7 @@ CREATE TABLE products (
     KEY idx_products_menu (is_active, category_id, sort_order),
     KEY idx_products_name (name),
     CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 9. BIẾN THỂ CỦA MÓN — NƠI DUY NHẤT CHỨA GIÁ BÁN
 CREATE TABLE product_variants (
@@ -354,7 +362,7 @@ CREATE TABLE product_variants (
     KEY idx_variants_active (product_id, is_active, sort_order),
     CONSTRAINT fk_variants_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE RESTRICT,
     CONSTRAINT ck_variants_factor  CHECK (stock_factor >= 1)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 10. NHÓM TÙY CHỌN
 CREATE TABLE option_groups (
@@ -385,7 +393,7 @@ CREATE TABLE option_groups (
         max_select >= 1 AND min_select <= max_select
         AND (is_required = 0 OR min_select >= 1)
     )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 11. TÙY CHỌN CỤ THỂ
 CREATE TABLE options (
@@ -402,7 +410,7 @@ CREATE TABLE options (
     UNIQUE KEY uq_options_group_name (option_group_id, name),
     KEY idx_options_active (option_group_id, is_active, sort_order),
     CONSTRAINT fk_options_group FOREIGN KEY (option_group_id) REFERENCES option_groups (id) ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================================
 -- NHÓM D — GIAO DỊCH BÁN HÀNG
@@ -449,7 +457,7 @@ CREATE TABLE orders (
     CONSTRAINT ck_orders_cancel CHECK (
         status <> 'cancelled' OR (cancelled_at IS NOT NULL AND cancel_reason IS NOT NULL AND cancelled_by_user_id IS NOT NULL)
     )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 13. DÒNG MÓN TRÊN PHIẾU
 CREATE TABLE order_items (
@@ -502,7 +510,7 @@ CREATE TABLE order_items (
     CONSTRAINT ck_order_items_cancel CHECK (
         status <> 'cancelled' OR (cancelled_at IS NOT NULL AND cancel_reason IS NOT NULL AND cancelled_by_user_id IS NOT NULL)
     )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 14. TÙY CHỌN ĐÃ CHỌN CHO TỪNG DÒNG MÓN
 CREATE TABLE order_item_options (
@@ -522,7 +530,7 @@ CREATE TABLE order_item_options (
     KEY idx_oio_option (option_id),
     CONSTRAINT fk_oio_item   FOREIGN KEY (order_item_id) REFERENCES order_items (id) ON DELETE RESTRICT,
     CONSTRAINT fk_oio_option FOREIGN KEY (option_id)     REFERENCES options (id)     ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================================
 -- NHÓM E — TIỀN KHÁCH TRẢ
@@ -571,7 +579,7 @@ CREATE TABLE payments (
     CONSTRAINT ck_payments_void CHECK (
         status <> 'voided' OR (voided_at IS NOT NULL AND void_reason IS NOT NULL AND voided_by_user_id IS NOT NULL)
     )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
 ---
@@ -602,7 +610,18 @@ Ký hiệu người gác: **DB** = database tự chặn · **APP** = code Larave
 | M2 | Mỗi phiếu có một mã "vân tay" `uuid` **duy nhất toàn hệ thống**, do máy POS sinh trước khi gửi. | **DB** (`uq_orders_uuid`) |
 | M3 | Gửi lại cùng một `uuid` **không tạo phiếu mới** — hệ thống trả về phiếu cũ. Bếp không bao giờ nhận hai tem giống nhau. | DB+APP |
 | M4 | Một dòng món luôn có đủ **bản sao** tên món, tên biến thể, giá. Sửa thực đơn về sau **không** làm đổi một chữ nào trên hoá đơn cũ. | **DB** (`NOT NULL`) + APP |
-| M5 | Thành tiền một dòng = (giá gốc + tiền tùy chọn) × số lượng. Không ai gõ tay được con số này. | **DB** (cột tự tính) |
+| M5 | Thành tiền một dòng = (giá gốc + tiền tùy chọn) × số lượng. Không ai gõ tay được con số này. | **DB** (cột tự tính) + **code** (xem ghi chú) |
+
+> **Ghi chú M5 — khác biệt MariaDB, đã kiểm chứng 31/07/2026.**
+> Cố ghi `line_amount = 1` cho dòng 3 lon × 25.000:
+> - MySQL 8 → từ chối cả câu lệnh, báo lỗi
+> - MariaDB 10.4 → nhận câu lệnh, **bỏ qua giá trị 1**, tự tính ra 75.000, kèm cảnh báo `#1906 The value ... has been ignored`
+>
+> Con số cuối cùng đúng ở cả hai. Nhưng trên MariaDB, một đoạn code sai có thể chạy nhiều tháng mà không ai biết — nó vẫn ra số đúng vì database âm thầm sửa hộ, không phải vì code đúng.
+>
+> Hai chốt bù, bắt buộc:
+> 1. `line_amount` (và mọi cột tự tính khác) **không bao giờ nằm trong `$fillable`** của Model. Laravel sẽ không gửi giá trị xuống, cảnh báo không có cơ hội xuất hiện.
+> 2. **Bắt buộc có test** cố ghi giá trị sai vào cột tự tính rồi đọc lại, khẳng định database tính đúng. Test này chạy mỗi lần, thay cho tiếng hét mà MySQL có còn MariaDB không.
 | M6 | Số lượng luôn ≥ 1. Không có dòng món số lượng 0 hoặc âm. | **DB** (`ck_order_items_qty`) |
 | M7 | Một phiếu chỉ chứa món của **một nơi làm** (bếp hoặc quầy), khớp với `station` của phiếu. | APP |
 | M8 | Chỉ thêm món được vào lượt khách đang ở trạng thái `open`. Đã in bill rồi thì phải mở lại lượt khách mới gọi thêm được. | APP |
@@ -1014,11 +1033,26 @@ Khi xóa để làm lại thì đi ngược từ 15 về 1.
 
 ## PHỤ LỤC — TÌNH TRẠNG KIỂM CHỨNG
 
-Toàn bộ DDL trong tài liệu này **đã chạy thật** trên MySQL 8.4.11 (Docker), ngày 30/07/2026.
+Toàn bộ DDL trong tài liệu này **đã chạy thật** trên MySQL 8.4.11, ngày 30/07/2026.
+
+**Kiểm chứng lại trên MariaDB 10.4.32 (XAMPP 8.2.12), ngày 31/07/2026 — cả 4 phép thử ĐẠT.**
+
+| Phép thử | Nội dung | MySQL 8 | MariaDB 10.4.32 |
+|---|---|---|---|
+| 1 | Hai lượt khách cùng một bàn → bị chặn | ✅ từ chối | ✅ từ chối, `Duplicate entry '5'` |
+| 2 | Hai ca cùng mở → bị chặn | ✅ từ chối | ✅ từ chối, `Duplicate entry '1'` |
+| 3 | Ràng buộc tiền (`CHECK`) được thi hành | ✅ từ chối | ✅ từ chối, `CONSTRAINT ... failed` |
+| 4 | Nhập tay đè lên thành tiền | ✅ từ chối cả câu | ⚠️ nhận câu, **bỏ giá trị sai**, tự tính đúng, cảnh báo `#1906` |
+
+Bảng mã đổi từ `utf8mb4_0900_ai_ci` sang `utf8mb4_unicode_ci`; so sánh tiếng Việt không dấu và không phân biệt hoa thường vẫn hoạt động như cũ.
+
+**Kết luận: cấu trúc bảng, khoá, ràng buộc giữ nguyên 100%.** Chỉ phép thử 4 khác cách báo — xử lý bằng hai chốt bù ở ghi chú bất biến M5.
+
+27 tình huống nghiệp vụ bên dưới được xác nhận trên MySQL 8. Vì 4 nền tảng quan trọng nhất đã đạt trên MariaDB, phần còn lại được coi là tương đương; gặp sai lệch thì ghi vào `docs/viec-ton.md`.
 Kết quả: 15 bảng, 30 khoá ngoại, 17 ràng buộc kiểm tra — tạo thành công, không lỗi.
 
 **27 tình huống nghiệp vụ đã thử, tất cả cho kết quả đúng như thiết kế.** Chi tiết từng
-tình huống xem `docs/huong-dan-docker.md` mục 6. Những chốt chặn quan trọng nhất đã
+tình huống xem `docs/huong-dan-moi-truong.md` mục 6. Những chốt chặn quan trọng nhất đã
 được xác nhận hoạt động:
 
 - Hai nhân viên cùng mở một bàn → người thứ hai bị database từ chối (B1)
@@ -1030,4 +1064,4 @@ tình huống xem `docs/huong-dan-docker.md` mục 6. Những chốt chặn quan
 - Hai ca mở cùng lúc → bị từ chối (C1)
 - Mọi ràng buộc tiền bạc T3, T4, T6, T7, T8 → hoạt động đúng
 
-Cách dựng lại môi trường để tự kiểm tra: xem `docs/huong-dan-docker.md`.
+Cách dựng lại môi trường để tự kiểm tra: xem `docs/huong-dan-moi-truong.md`.
