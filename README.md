@@ -48,19 +48,82 @@ npm run dev
 
 Lệnh này bật màn hình để bấm chọn món, thu tiền... Cửa sổ này cũng phải để yên khi đang bán hàng.
 
-### Nếu cần in tem bếp/quầy chạy nền
+### Nếu cần in tem bếp, tạm tính, bill
 
-Mở thêm một cửa sổ nữa:
+Máy in nhiệt 80mm được kết nối qua cổng USB của máy quầy. Print Agent (một ứng dụng Node.js nhỏ) chạy nền trên cùng máy quầy, nhận công việc in từ hệ thống và đẩy sang máy in.
+
+**Cách cài lần đầu** (chỉ cần một lần):
+
+1. Mở cửa sổ dòng lệnh, đi vào thư mục `print-agent`:
 
 ```bash
-php artisan queue:listen --tries=1
+cd print-agent
 ```
+
+2. Cài dependencies (Node.js libraries):
+
+```bash
+npm install
+```
+
+3. Copy cấu hình mẫu:
+
+```bash
+cp .env.example .env
+```
+
+4. Chỉnh sửa `.env`:
+   - Tìm mã VID/PID của máy in (xem hướng dẫn chi tiết trong `print-agent/README.md`, mục "Tìm mã định danh")
+   - Sửa các dòng `PRINTER_VENDOR_ID` và `PRINTER_PRODUCT_ID`
+
+**Cách chạy Print Agent**:
+
+Mở một cửa sổ dòng lệnh **khác** (đừng tắt cửa sổ của `php artisan serve` và `npm run dev`), đi vào thư mục `print-agent` rồi chạy:
+
+```bash
+npm start
+```
+
+Cửa sổ này sẽ in ra:
+```
+[2026-08-01T10:23:45.123Z] 🚀 Print Agent khởi động
+[2026-08-01T10:23:45.125Z] ✅ Agent sẵn sàng. Chờ công việc in...
+```
+
+Khi quán in tem bếp / tạm tính / hoá đơn, Print Agent sẽ nhận được job và tự động in ra máy. Cửa sổ này **phải để yên, không được tắt** khi quán đang bán hàng.
+
+**Cách test trước khi dùng thật**:
+
+```bash
+php artisan pos:print-test
+```
+
+Lệnh này sinh các mẫu ESC/POS vào `storage/app/print-test/`, rồi copy vào hàng đợi để Print Agent test in:
+
+```bash
+cp storage/app/print-test/*.bin print-agent/queue/
+```
+
+Xem log Print Agent để kiểm tra:
+```bash
+tail -f print-agent/logs/print-agent.log
+```
+
+Nếu in ra giấy thành công → đã sẵn sàng dùng thật.
+
+**Hướng dẫn chi tiết**: Xem `print-agent/README.md`
 
 ---
 
 ## 2. Cách tắt hệ thống
 
-1. Vào từng cửa sổ dòng lệnh đang chạy `php artisan serve`, `npm run dev`, `php artisan queue:listen` — bấm `Ctrl + C` để dừng.
+1. Vào từng cửa sổ dòng lệnh đang chạy:
+   - `php artisan serve` (API máy chủ)
+   - `npm run dev` (giao diện web)
+   - `npm start` trong thư mục `print-agent/` (nếu có)
+   
+   Bấm `Ctrl + C` để dừng từng cây.
+
 2. Mở XAMPP Control Panel, bấm **Stop** ở dòng `MySQL`.
 
 Tắt theo thứ tự nào cũng được, không sợ mất dữ liệu — dữ liệu đã lưu trong database rồi, tắt web/giao diện không xoá gì cả.

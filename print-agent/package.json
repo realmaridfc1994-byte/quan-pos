@@ -1,0 +1,21 @@
+{
+  "name": "pos-print-agent",
+  "version": "1.0.0",
+  "description": "Print agent cho quán nhậu — nhận job in từ hàng đợi Laravel, in ra máy nhiệt ESC/POS",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "keywords": [
+    "escpos",
+    "thermal printer",
+    "pos"
+  ],
+  "author": "POS Quán Nhậu",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "usb": "^1.10.2"
+  }
+}
