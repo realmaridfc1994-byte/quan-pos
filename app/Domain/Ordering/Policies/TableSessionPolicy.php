@@ -16,6 +16,30 @@ final class TableSessionPolicy
         return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
     }
 
+    /** Ghép thêm bàn vào lượt khách đang mở. */
+    public function attachTable(User $user, TableSession $tableSession): bool
+    {
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
+    }
+
+    /** Nhả một bàn ra khỏi lượt khách đang mở. */
+    public function detachTable(User $user, TableSession $tableSession): bool
+    {
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
+    }
+
+    /** Chuyển bàn cho lượt khách đang mở. */
+    public function transferTable(User $user, TableSession $tableSession): bool
+    {
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
+    }
+
+    /** Đóng lượt khách. */
+    public function close(User $user, TableSession $tableSession): bool
+    {
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
+    }
+
     /**
      * Giảm giá trên hoá đơn.
      * Chủ quán giảm bao nhiêu cũng được, thu ngân tối đa 20%, nhân viên không được giảm.
@@ -33,5 +57,15 @@ final class TableSessionPolicy
     public function void(User $user, TableSession $tableSession): bool
     {
         return in_array($user->role, [UserRole::Owner, UserRole::Cashier], true);
+    }
+
+    /**
+     * Được phép gọi API giảm giá hay không. Mức % cụ thể được duyệt trong
+     * CalculateBill theo ngưỡng vai trò của discount() ở trên — hàm này chỉ
+     * chặn từ vòng ngoài những người không bao giờ được đụng vào giảm giá.
+     */
+    public function requestDiscount(User $user, TableSession $tableSession): bool
+    {
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
     }
 }

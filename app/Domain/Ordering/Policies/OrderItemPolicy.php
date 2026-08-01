@@ -24,6 +24,18 @@ final class OrderItemPolicy
         return in_array($user->role, [UserRole::Owner, UserRole::Cashier], true);
     }
 
+    /** Sửa số lượng/ghi chú một dòng món chưa gửi bếp — cùng tầng quyền với gọi món. */
+    public function update(User $user): bool
+    {
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
+    }
+
+    /** Bỏ một dòng món chưa gửi bếp — cùng tầng quyền với gọi món. */
+    public function remove(User $user): bool
+    {
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
+    }
+
     /** Đổi trạng thái món trên màn hình bếp/quầy (KDS). */
     public function updateStatus(User $user): bool
     {

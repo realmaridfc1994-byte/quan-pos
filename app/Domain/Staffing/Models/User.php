@@ -10,6 +10,9 @@ use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Ordering\Models\TableSessionTable;
 use App\Domain\Staffing\Enums\UserRole;
 use Database\Factories\UserFactory;
+use Filament\Models\Contracts\FilamentUser;
+use Filament\Models\Contracts\HasName;
+use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -17,10 +20,25 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
 /** @property UserRole $role */
-final class User extends Authenticatable
+final class User extends Authenticatable implements FilamentUser, HasName
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
+
+    /**
+     * Chỉ chủ quán/thu ngân vào được trang quản lý thực đơn — phục vụ/bếp
+     * không có việc gì phải sửa giá món hay tắt/bật danh mục.
+     */
+    public function canAccessPanel(Panel $panel): bool
+    {
+        return $this->is_active && in_array($this->role, [UserRole::Owner, UserRole::Cashier], true);
+    }
+
+    /** Bảng users không có cột email — Filament hiển thị tên bằng cột name. */
+    public function getFilamentName(): string
+    {
+        return $this->name;
+    }
 
     protected static function newFactory(): UserFactory
     {

@@ -14,4 +14,10 @@ final class OrderPolicy
     {
         return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
     }
+
+    /** Gửi một phiếu đã gọi xuống bếp/quầy. */
+    public function send(User $user): bool
+    {
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
+    }
 }

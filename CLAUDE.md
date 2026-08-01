@@ -134,22 +134,23 @@ Món hàng nào không rõ thuộc nhóm nào thì hỏi, đừng tự đoán.
 8. **Mọi phép tính tiền đi qua `App\Support\Money`.** Không `+`, `-`, `*` trực tiếp trên biến tiền trong Action hay Controller. Money tự chặn kết quả âm.
 9. **Mọi thay đổi dữ liệu liên quan tiền phải nằm trong `DB::transaction()`**: thu tiền, huỷ phiếu thu, giảm giá, đóng lượt khách, đóng ca, tính lại tổng tiền. Trong transaction phải `lockForUpdate()` dòng `table_sessions` hoặc `shifts` liên quan trước khi đọc để tính.
 10. **Số tiền trên hoá đơn được chốt, không tính lại về sau.** `order_items` luôn lưu bản sao `product_name`, `variant_name`, `unit_price`. Sửa giá trong thực đơn **không** được làm đổi một chữ nào trên hoá đơn cũ.
+11. **Mọi Action đụng tiền khoá theo đúng một thứ tự chung: `Shift` → `TableSession` → `Payment`.** Khoá ngược thứ tự nhau giữa hai Action là kẹt chéo (deadlock) — MySQL tự phát hiện và huỷ một bên, nhưng thu ngân nhận lỗi khó hiểu. Cần khoá nhiều dòng `Shift` cùng lúc thì khoá theo `id` tăng dần, giống quy tắc khoá nhiều bàn ở luật 17.
 
 ### Dữ liệu
 
-11. **Không xoá cứng dữ liệu giao dịch.** Với `table_sessions`, `table_session_tables`, `orders`, `order_items`, `order_item_options`, `payments`, `shifts`, `cash_movements`: không `delete()`, không `truncate()`, không `forceDelete()`. Huỷ = đổi trạng thái + ghi **ai huỷ, lúc nào, vì sao**. Thiếu một trong ba thì database từ chối.
-12. **Danh mục không xoá, chỉ tắt cờ `is_active`**: nhân viên nghỉ việc, bàn dẹp đi, món ngưng bán, biến thể bỏ.
-13. **Tên bảng: số nhiều, snake_case** (`table_sessions`, `order_items`). **Tên cột: snake_case** (`opened_by_user_id`, `total_amount`). Khoá ngoại: `<bảng_số_ít>_id`. Tiền: hậu tố `_amount`. Thời điểm: hậu tố `_at`. Cờ: tiền tố `is_`. Người thực hiện: `<động_từ>_by_user_id`.
-14. **Mọi khoá ngoại là `ON DELETE RESTRICT`.** Không `CASCADE`, không `SET NULL`.
-15. **Trạng thái luôn là PHP Enum backed by string**, cast trong Model. Không so sánh chuỗi trần `=== 'open'` rải rác trong code.
-16. **Giữ chỗ nhiều bàn thì luôn khoá theo `dining_table_id` tăng dần** — đây là quy tắc chống kẹt chéo (deadlock) đã chốt ở `docs/schema.md` Phần 6. Không có ngoại lệ.
+12. **Không xoá cứng dữ liệu giao dịch.** Với `table_sessions`, `table_session_tables`, `orders`, `order_items`, `order_item_options`, `payments`, `shifts`, `cash_movements`: không `delete()`, không `truncate()`, không `forceDelete()`. Huỷ = đổi trạng thái + ghi **ai huỷ, lúc nào, vì sao**. Thiếu một trong ba thì database từ chối.
+13. **Danh mục không xoá, chỉ tắt cờ `is_active`**: nhân viên nghỉ việc, bàn dẹp đi, món ngưng bán, biến thể bỏ.
+14. **Tên bảng: số nhiều, snake_case** (`table_sessions`, `order_items`). **Tên cột: snake_case** (`opened_by_user_id`, `total_amount`). Khoá ngoại: `<bảng_số_ít>_id`. Tiền: hậu tố `_amount`. Thời điểm: hậu tố `_at`. Cờ: tiền tố `is_`. Người thực hiện: `<động_từ>_by_user_id`.
+15. **Mọi khoá ngoại là `ON DELETE RESTRICT`.** Không `CASCADE`, không `SET NULL`.
+16. **Trạng thái luôn là PHP Enum backed by string**, cast trong Model. Không so sánh chuỗi trần `=== 'open'` rải rác trong code.
+17. **Giữ chỗ nhiều bàn thì luôn khoá theo `dining_table_id` tăng dần** — đây là quy tắc chống kẹt chéo (deadlock) đã chốt ở `docs/schema.md` Phần 6. Không có ngoại lệ.
 
 ### Code và test
 
-17. **Mọi Action mới phải có feature test.** Test viết bằng Pest, tiếng Việt trong phần mô tả, đặt trong `tests/Feature/<Nhóm>/`.
-18. **Test phải phủ cả đường thất bại**, không chỉ đường thành công: bàn đã có khách, ca đã đóng, thu thiếu tiền, huỷ mà không ghi lý do.
-19. **Không viết comment giải thích cú pháp PHP.** Comment chỉ để giải thích *quyết định nghiệp vụ* và viết bằng tiếng Việt.
-20. **Chạy `./vendor/bin/pint` trước khi coi một việc là xong.**
+18. **Mọi Action mới phải có feature test.** Test viết bằng Pest, tiếng Việt trong phần mô tả, đặt trong `tests/Feature/<Nhóm>/`.
+19. **Test phải phủ cả đường thất bại**, không chỉ đường thành công: bàn đã có khách, ca đã đóng, thu thiếu tiền, huỷ mà không ghi lý do.
+20. **Không viết comment giải thích cú pháp PHP.** Comment chỉ để giải thích *quyết định nghiệp vụ* và viết bằng tiếng Việt.
+21. **Chạy `./vendor/bin/pint` trước khi coi một việc là xong.**
 
 ---
 

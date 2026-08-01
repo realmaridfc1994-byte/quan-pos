@@ -58,4 +58,10 @@ final class Product extends Model
     {
         return $this->hasMany(OptionGroup::class);
     }
+
+    /** E6: nơi in tem = station_override nếu có, không thì lấy theo nhóm món. */
+    public function effectiveStation(): Station
+    {
+        return $this->station_override ?? $this->category->station;
+    }
 }
