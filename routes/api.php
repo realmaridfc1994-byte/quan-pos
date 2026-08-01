@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CashMovementController;
+use App\Http\Controllers\Api\ShiftController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -16,5 +18,12 @@ Route::prefix('v1')->group(function (): void {
             Route::post('pin-verify', [AuthController::class, 'pinVerify'])
                 ->middleware(['throttle:5,1,pin-verify-minute', 'throttle:20,60,pin-verify-hour']);
         });
+    });
+
+    Route::prefix('shifts')->middleware(['auth:sanctum', 'active'])->group(function (): void {
+        Route::post('open', [ShiftController::class, 'open'])->middleware('idempotent');
+        Route::get('current', [ShiftController::class, 'current']);
+        Route::post('{shift}/close', [ShiftController::class, 'close'])->middleware('idempotent');
+        Route::post('{shift}/cash-movements', [CashMovementController::class, 'store'])->middleware('idempotent');
     });
 });
