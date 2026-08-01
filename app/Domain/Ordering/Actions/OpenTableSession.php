@@ -37,7 +37,11 @@ final class OpenTableSession
         }
 
         return DB::transaction(function () use ($data): TableSession {
-            $shift = Shift::query()->where('status', ShiftStatus::Open)->first();
+            // Khoá dòng ca TRƯỚC khi tạo lượt khách (luật CLAUDE.md mục 11: Shift →
+            // TableSession) — không khoá thì đọc theo snapshot REPEATABLE READ, có
+            // thể thấy ca "open" đúng lúc CloseShift đang khoá và đóng ca đó, tạo ra
+            // một lượt khách trỏ vào ca đã đóng mà RecordPayment vĩnh viễn từ chối.
+            $shift = Shift::query()->where('status', ShiftStatus::Open)->lockForUpdate()->first();
 
             if ($shift === null) {
                 throw new DomainException('Chưa mở ca. Phải mở ca trước khi mở bàn.');

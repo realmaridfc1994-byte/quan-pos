@@ -33,6 +33,7 @@ Route::prefix('v1')->group(function (): void {
         Route::get('current', [ShiftController::class, 'current']);
         Route::post('{shift}/close', [ShiftController::class, 'close'])->middleware('idempotent');
         Route::post('{shift}/cash-movements', [CashMovementController::class, 'store'])->middleware('idempotent');
+        Route::get('{shift}/report', [ShiftController::class, 'report']);
     });
 
     Route::middleware(['auth:sanctum', 'active'])->group(function (): void {

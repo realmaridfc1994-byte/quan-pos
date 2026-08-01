@@ -9,3 +9,20 @@
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
+
+/* In tạm tính: khi bấm "In", chỉ in nội dung #modal-xem, ẩn hết phần còn lại của màn hình. */
+@media print {
+    body * {
+        visibility: hidden;
+    }
+    #modal-xem,
+    #modal-xem * {
+        visibility: visible;
+    }
+    #modal-xem {
+        position: fixed;
+        inset: 0;
+        background: white;
+        color: black;
+    }
+}

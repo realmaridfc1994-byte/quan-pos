@@ -5,9 +5,12 @@ declare(strict_types=1);
 use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\DiningTable;
 use App\Domain\Ordering\Models\TableSession;
+use App\Domain\Staffing\Actions\CloseShift;
+use App\Domain\Staffing\DTO\CloseShiftData;
 use App\Domain\Staffing\Enums\ShiftStatus;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
+use App\Support\Money;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 
@@ -124,4 +127,55 @@ it('mã lượt khách đúng định dạng PH-yyyymmdd-NNNN', function () {
     $luot = TableSession::query()->sole();
     expect($luot->code)->toStartWith('PH-'.now()->format('Ymd').'-')
         ->and($luot->status)->toBe(TableSessionStatus::Open);
+});
+
+it('không có lượt khách nào thì đóng ca thành công', function () {
+    $ca = Shift::query()->where('status', ShiftStatus::Open)->sole();
+    $chuCa = User::factory()->owner()->create();
+
+    $caDaDong = app(CloseShift::class)->handle(new CloseShiftData(
+        shiftId: $ca->id,
+        countedCash: Money::fromInt($ca->opening_cash),
+        note: null,
+        closedByUserId: $chuCa->id,
+    ));
+
+    expect($caDaDong->status)->toBe(ShiftStatus::Closed);
+});
+
+it('CHỐNG RACE: đóng ca xong thì mở lượt khách mới ngay sau đó phải bị chặn, không được tạo lượt khách trỏ vào ca đã đóng', function () {
+    $ca = Shift::query()->where('status', ShiftStatus::Open)->sole();
+    $chuCa = User::factory()->owner()->create();
+
+    app(CloseShift::class)->handle(new CloseShiftData(
+        shiftId: $ca->id,
+        countedCash: Money::fromInt($ca->opening_cash),
+        note: null,
+        closedByUserId: $chuCa->id,
+    ));
+
+    $staff = User::factory()->staff()->create();
+
+    moBan($staff)
+        ->assertUnprocessable()
+        ->assertJsonPath('message', 'Chưa mở ca. Phải mở ca trước khi mở bàn.');
+
+    expect(TableSession::query()->where('shift_id', $ca->id)->count())->toBe(0);
+});
+
+it('BẤT BIẾN: không tồn tại lượt khách Open/Billing nào trỏ vào một ca đã Closed (quét toàn bảng)', function () {
+    // Trường hợp hợp lệ 1: ca cũ đã đóng, lượt khách của nó cũng đã đóng đúng cách.
+    $caCu = Shift::factory()->closed()->create();
+    TableSession::factory()->closed()->create(['shift_id' => $caCu->id]);
+
+    // Trường hợp hợp lệ 2: ca hiện tại (mở bởi beforeEach) có một lượt khách đang mở.
+    $staff = User::factory()->staff()->create();
+    moBan($staff)->assertCreated();
+
+    $luotMoTroVaoCaDaDong = TableSession::query()
+        ->whereIn('status', [TableSessionStatus::Open, TableSessionStatus::Billing])
+        ->whereHas('shift', fn ($q) => $q->where('status', ShiftStatus::Closed))
+        ->count();
+
+    expect($luotMoTroVaoCaDaDong)->toBe(0);
 });

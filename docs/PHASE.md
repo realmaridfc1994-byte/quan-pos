@@ -5,7 +5,7 @@
 
 ```
 PHASE = 1
-BUOC_DANG_MO = 7
+BUOC_DANG_MO = 11
 ```
 
 **Phase 1 — MVP bán hàng. Bước 1 — Ca làm việc.**

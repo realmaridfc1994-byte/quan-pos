@@ -37,4 +37,9 @@ Ví dụ:
 [Bước 11] Cân nhắc thêm CHECK ck_table_sessions_not_overpaid (total_amount >= paid_amount) ở tầng DB — hiện chỉ chặn ở tầng code — 01/08
 [Bước 8] Z-report phải hiện riêng các khoản hoàn tiền phiếu thu ca cũ, tách khỏi thu chi vặt thường — để chủ quán tra được vì sao két lệch — 01/08
 [Bước 8] Z-report đếm "số lượt khách trong ca" phải xử lý được lượt khách chuyển ca do huỷ phiếu thu — nó mở ở ca này nhưng thu tiền ở ca khác — 01/08
-[Bước 11] Rà lại thứ tự khoá của RecordPayment, VoidPayment, CalculateBill, CloseShift cho khớp luật Shift → TableSession → Payment — 01/08
+[Bước 11] Rà lại thứ tự khoá của RecordPayment, CalculateBill, CloseShift cho khớp luật Shift → TableSession → Payment — VoidPayment đã xử lý xong (gộp khoá 2 ca theo id tăng dần trong 1 câu whereIn, ca hiện tại khoá riêng ở bước sau vì id chưa biết trước) — 01/08
+[Phase 2] Z-report cột "người duyệt" món huỷ hiện dùng cancelled_by_user_id (người bấm huỷ) — không đổi schema ở P1. Thiết kế cột approved_by ở P2, cùng lúc với luồng duyệt PIN huỷ món sau khi gửi bếp — 01/08
+[Bước 9] In tem bếp, tạm tính, bill bằng ESC/POS 80mm — ba mẫu tiếng Việt, Node.js print agent chạy trên LAN, lệnh `pos:print-test`, ghi README — 01/08
+[Bước 9-10] Nút "In tạm tính" và "In bill" trên màn POS đang in qua trình duyệt. Cần: (a) endpoint POST /api/v1/table-sessions/{id}/print/{loai} đẩy việc in vào hàng đợi, (b) màn POS gọi endpoint đó thay vì window.print(), (c) xử lý khi print agent không chạy — báo lỗi rõ cho thu ngân, không im lặng — 01/08
+[Đã quyết - không làm] PIN chỉ dùng để DUYỆT việc nhạy cảm, không bao giờ dùng để đăng nhập thay người. Đổi ca phải đăng xuất và đăng nhập bằng SĐT + mật khẩu. Lý do: PIN 4 số làm mật khẩu thì nhân viên dò ra sẽ đăng nhập thành quản lý và activity_log ghi nhầm người — 01/08
+[Phase 2] Z-report nên hiện riêng dòng "chi vượt tiền thu" để chủ quán biết ca đó phải bù tiền từ ngoài két bao nhiêu — 01/08

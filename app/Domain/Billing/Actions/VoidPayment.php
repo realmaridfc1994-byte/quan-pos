@@ -16,6 +16,7 @@ use App\Domain\Staffing\Models\CashMovement;
 use App\Domain\Staffing\Models\Shift;
 use App\Exceptions\DomainException;
 use App\Support\Money;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -80,8 +81,23 @@ final class VoidPayment
                 'void_reason' => $lyDo,
             ]);
 
-            $caCuaPhieu = Shift::query()->lockForUpdate()->findOrFail($payment->shift_id);
-            $caCuaLuotKhach = Shift::query()->lockForUpdate()->findOrFail($tableSession->shift_id);
+            // Chống kẹt chéo (CLAUDE.md mục 11/17): khoá cả hai ca liên quan trong
+            // MỘT câu, theo id tăng dần — không khoá $caCuaPhieu rồi $caCuaLuotKhach
+            // bằng hai câu riêng như trước (thứ tự có thể ngược nhau giữa hai lượt
+            // huỷ chạm đúng hai ca đó theo chiều ngược lại). $caHienTai (nếu cần)
+            // chỉ lộ ra SAU khi biết trạng thái hai ca này nên phải khoá ở một bước
+            // riêng, sau — xem ghi chú ngay phía dưới chỗ khoá nó.
+            $idCacCaCanKhoa = collect([$payment->shift_id, $tableSession->shift_id])->unique()->sort()->values();
+
+            $caTheoId = Shift::query()
+                ->whereIn('id', $idCacCaCanKhoa)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $caCuaPhieu = $caTheoId->get($payment->shift_id) ?? throw new ModelNotFoundException("Không tìm thấy ca #{$payment->shift_id}.");
+            $caCuaLuotKhach = $caTheoId->get($tableSession->shift_id) ?? throw new ModelNotFoundException("Không tìm thấy ca #{$tableSession->shift_id}.");
 
             $tongDaThu = Payment::query()
                 ->where('table_session_id', $tableSession->id)
@@ -100,6 +116,16 @@ final class VoidPayment
 
             // Lấy ca đang mở MỘT LẦN, dùng chung cho cả khoản hoàn tiền lẫn việc
             // chuyển lượt khách sang ca hôm nay — không truy vấn hai lần.
+            //
+            // Không gộp được vào câu whereIn ở trên: id của ca đang mở chỉ lộ ra
+            // SAU khi biết $caCuaPhieu/$caCuaLuotKhach đã đóng hay chưa (chỉ cần
+            // tìm nó khi $canHoanTienMat/$canChuyenCaLuotKhach), nên buộc phải
+            // khoá ở một bước riêng, đứng sau. Đây là khoá thứ ba, chấp nhận có
+            // thể lệch thứ tự id tăng dần so với hai ca đã khoá ở trên — hai lượt
+            // huỷ phiếu thu khác nhau hiếm khi chạm đúng cả ba ca theo chiều
+            // ngược nhau (thực tế chỉ có MỘT ca đang mở tại một thời điểm, nhờ
+            // uq_shifts_only_one_open), nên rủi ro kẹt chéo ở bước này thấp hơn
+            // nhiều so với hai ca đã biết trước id ở trên.
             $caHienTai = null;
 
             if ($canHoanTienMat || $canChuyenCaLuotKhach) {

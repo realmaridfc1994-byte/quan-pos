@@ -37,4 +37,10 @@ final class ShiftPolicy
     {
         return in_array($user->role, [UserRole::Owner, UserRole::Cashier], true);
     }
+
+    /** Xem báo cáo doanh thu cuối ca: chỉ chủ quán/thu ngân, kể cả ca của người khác. */
+    public function viewReport(User $user, Shift $shift): bool
+    {
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier], true);
+    }
 }

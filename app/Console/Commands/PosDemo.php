@@ -25,10 +25,14 @@ use App\Domain\Ordering\DTO\UpdateOrderItemStatusData;
 use App\Domain\Ordering\Models\DiningTable;
 use App\Domain\Ordering\Models\Order;
 use App\Domain\Ordering\Models\TableSession;
+use App\Domain\Staffing\Actions\CloseShift;
 use App\Domain\Staffing\Actions\OpenShift;
+use App\Domain\Staffing\DTO\CloseShiftData;
 use App\Domain\Staffing\DTO\OpenShiftData;
 use App\Domain\Staffing\Enums\UserRole;
+use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
+use App\Support\CashVariance;
 use App\Support\Money;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -47,7 +51,7 @@ use Symfony\Component\Console\Command\Command as CommandAlias;
  */
 final class PosDemo extends Command
 {
-    protected $signature = 'pos:demo {--den=ca : Mốc dừng lại — "ca", "ban", "goi-mon", "gui-bep", "huy-mon" hoặc "thu-tien"}';
+    protected $signature = 'pos:demo {--den=dong-ca : Mốc dừng lại — "ca", "ban", "goi-mon", "gui-bep", "huy-mon", "thu-tien" hoặc "dong-ca" (mặc định — chạy trọn vẹn)}';
 
     protected $description = 'Diễn tập một ca bán hàng mẫu, dùng để tự kiểm tra bằng mắt (chỉ chạy ở môi trường local)';
 
@@ -62,6 +66,7 @@ final class PosDemo extends Command
         UpdateOrderItemStatus $capNhatTrangThaiMon,
         CancelOrderItem $huyMon,
         RecordPayment $thuTien,
+        CloseShift $dongCa,
     ): int {
         if (! app()->environment('local')) {
             $this->line('<fg=red>❌ Lệnh này chỉ chạy ở môi trường local, môi trường hiện tại là "'.app()->environment().'".</>');
@@ -70,9 +75,10 @@ final class PosDemo extends Command
         }
 
         $den = $this->option('den');
+        $cacMoc = ['ca', 'ban', 'goi-mon', 'gui-bep', 'huy-mon', 'thu-tien', 'dong-ca'];
 
-        if (! in_array($den, ['ca', 'ban', 'goi-mon', 'gui-bep', 'huy-mon', 'thu-tien'], true)) {
-            $this->line("<fg=red>❌ Chưa hỗ trợ --den={$den}. Bước này chỉ hỗ trợ --den=ca, --den=ban, --den=goi-mon, --den=gui-bep, --den=huy-mon hoặc --den=thu-tien.</>");
+        if (! in_array($den, $cacMoc, true)) {
+            $this->line("<fg=red>❌ Chưa hỗ trợ --den={$den}. Bước này chỉ hỗ trợ --den=".implode(', --den=', $cacMoc).'.</>');
 
             return CommandAlias::FAILURE;
         }
@@ -82,26 +88,30 @@ final class PosDemo extends Command
         DB::beginTransaction();
 
         try {
-            $thuNgan = $this->dienTapMoCa($moCa);
+            [$thuNgan, $ca] = $this->dienTapMoCa($moCa);
 
-            if (in_array($den, ['ban', 'goi-mon', 'gui-bep', 'huy-mon', 'thu-tien'], true)) {
+            if (in_array($den, ['ban', 'goi-mon', 'gui-bep', 'huy-mon', 'thu-tien', 'dong-ca'], true)) {
                 $luotKhach = $this->dienTapMoBan($moBan);
             }
 
-            if (in_array($den, ['goi-mon', 'gui-bep', 'huy-mon', 'thu-tien'], true)) {
+            if (in_array($den, ['goi-mon', 'gui-bep', 'huy-mon', 'thu-tien', 'dong-ca'], true)) {
                 $phieux = $this->dienTapGoiMon($goiMon, $luotKhach);
             }
 
-            if (in_array($den, ['gui-bep', 'huy-mon', 'thu-tien'], true)) {
+            if (in_array($den, ['gui-bep', 'huy-mon', 'thu-tien', 'dong-ca'], true)) {
                 $this->dienTapGuiBepVaBaoXong($guiBep, $capNhatTrangThaiMon, $phieux);
             }
 
-            if (in_array($den, ['huy-mon', 'thu-tien'], true)) {
+            if (in_array($den, ['huy-mon', 'thu-tien', 'dong-ca'], true)) {
                 $this->dienTapHuyMon($huyMon, $luotKhach, $thuNgan, $phieux[0]);
             }
 
-            if ($den === 'thu-tien') {
-                $this->dienTapThuTien($thuTien, $luotKhach, $thuNgan);
+            if (in_array($den, ['thu-tien', 'dong-ca'], true)) {
+                $tienMatDaThu = $this->dienTapThuTien($thuTien, $luotKhach, $thuNgan);
+            }
+
+            if ($den === 'dong-ca') {
+                $this->dienTapDongCa($dongCa, $ca, $thuNgan, $tienMatDaThu);
             }
 
             $ketQua = CommandAlias::SUCCESS;
@@ -123,7 +133,8 @@ final class PosDemo extends Command
         return $ketQua;
     }
 
-    private function dienTapMoCa(OpenShift $moCa): User
+    /** @return array{0: User, 1: Shift} */
+    private function dienTapMoCa(OpenShift $moCa): array
     {
         $this->mocHienTai = 'MỞ CA';
         $this->line('<fg=cyan;options=bold>MỞ CA</>');
@@ -145,7 +156,7 @@ final class PosDemo extends Command
 
         $this->line("   Ca {$ca->code} mở bởi {$thuNgan->name}, tiền lẻ đầu ca {$tienDauCa->format()}");
 
-        return $thuNgan;
+        return [$thuNgan, $ca];
     }
 
     private function dienTapMoBan(OpenTableSession $moBan): TableSession
@@ -284,7 +295,7 @@ final class PosDemo extends Command
         $this->line("   Tạm tính sau khi huỷ: {$tamTinhSau->format()}");
     }
 
-    private function dienTapThuTien(RecordPayment $thuTien, TableSession $luotKhach, User $thuNgan): void
+    private function dienTapThuTien(RecordPayment $thuTien, TableSession $luotKhach, User $thuNgan): Money
     {
         $this->mocHienTai = 'THU TIỀN';
         $this->newLine();
@@ -311,5 +322,41 @@ final class PosDemo extends Command
 
         $luotKhach->refresh();
         $this->line("   Trạng thái lượt khách sau khi thu: {$luotKhach->status->value}");
+
+        return $tongPhaiThu;
+    }
+
+    private function dienTapDongCa(CloseShift $dongCa, Shift $ca, User $thuNgan, Money $tienMatDaThu): void
+    {
+        $this->mocHienTai = 'ĐÓNG CA';
+        $this->newLine();
+        $this->line('<fg=cyan;options=bold>ĐÓNG CA</>');
+
+        // C4: đầu ca + tiền mặt thu được − tiền thối (thối cố định 50.000 ở mốc
+        // THU TIỀN, không có khoản thu chi vặt nào trong diễn tập).
+        $tienLeRaPhaiCo = Money::fromInt($ca->refresh()->opening_cash)
+            ->plus($tienMatDaThu)
+            ->minus(Money::fromInt(50_000));
+
+        // Đếm thực tế thiếu 20.000 so với lẽ ra phải có — để chứng minh đóng ca
+        // vẫn thành công dù két không khớp tuyệt đối, C4/C5 vẫn chốt đúng số.
+        $demDuoc = $tienLeRaPhaiCo->minus(Money::fromInt(20_000));
+
+        $caDaDong = $dongCa->handle(new CloseShiftData(
+            shiftId: $ca->id,
+            countedCash: $demDuoc,
+            note: 'Ca diễn tập',
+            closedByUserId: $thuNgan->id,
+        ));
+
+        $chenhLech = CashVariance::between(
+            Money::fromInt($caDaDong->counted_cash),
+            Money::fromInt($caDaDong->expected_cash)
+        );
+
+        $this->line('   Tiền mặt lẽ ra phải có: '.Money::fromInt($caDaDong->expected_cash)->format());
+        $this->line("   Đếm thực tế trong két: {$demDuoc->format()}");
+        $this->line("   Chênh lệch: {$chenhLech->format()}");
+        $this->line("   Trạng thái ca: {$caDaDong->status->value}");
     }
 }

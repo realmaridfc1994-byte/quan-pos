@@ -10,9 +10,11 @@ use App\Domain\Staffing\DTO\CloseShiftData;
 use App\Domain\Staffing\DTO\OpenShiftData;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Queries\GetCurrentShift;
+use App\Domain\Staffing\Queries\GetShiftReport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CloseShiftRequest;
 use App\Http\Requests\OpenShiftRequest;
+use App\Http\Requests\ViewShiftReportRequest;
 use App\Http\Resources\ShiftResource;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -47,6 +49,14 @@ final class ShiftController extends Controller
 
         return response()->json([
             'data' => $shift !== null ? ShiftResource::make($shift->load('openedBy')) : null,
+        ]);
+    }
+
+    /** GET /api/v1/shifts/{shift}/report */
+    public function report(ViewShiftReportRequest $request, Shift $shift, GetShiftReport $query): JsonResponse
+    {
+        return response()->json([
+            'data' => $query->handle($shift->id),
         ]);
     }
 }
