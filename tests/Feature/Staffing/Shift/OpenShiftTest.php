@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Domain\Staffing\Actions\CloseShift;
+use App\Domain\Staffing\DTO\CloseShiftData;
 use App\Domain\Staffing\Enums\ShiftStatus;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
+use App\Support\Money;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 
@@ -32,6 +35,31 @@ it('thu ngân mở ca thành công, mã ca đúng định dạng CA-yyyymmdd-NN'
     expect($ca->code)->toStartWith('CA-'.now()->format('Ymd').'-')
         ->and($ca->opened_by_user_id)->toBe($thuNgan->id)
         ->and($ca->status)->toBe(ShiftStatus::Open);
+});
+
+it('Bước 2: mở 3 ca liên tiếp (đóng cái trước rồi mở cái sau) — mã đúng định dạng CA-{Ymd}-{số}, không trùng nhau', function () {
+    $thuNgan = User::factory()->cashier()->create();
+    $homNay = now()->format('Ymd');
+    $maDaMo = [];
+
+    for ($i = 0; $i < 3; $i++) {
+        $response = moCa($thuNgan)->assertCreated();
+        $ma = $response->json('data.code');
+
+        expect($ma)->toMatch('/^CA-'.$homNay.'-\d+$/');
+        $maDaMo[] = $ma;
+
+        $ca = Shift::query()->where('code', $ma)->sole();
+        app(CloseShift::class)->handle(new CloseShiftData(
+            shiftId: $ca->id,
+            countedCash: Money::fromInt(500_000),
+            note: null,
+            closedByUserId: $thuNgan->id,
+        ));
+    }
+
+    expect($maDaMo)->toHaveCount(3)
+        ->and(array_unique($maDaMo))->toHaveCount(3);
 });
 
 it('C1: đã có ca mở thì không mở được ca thứ hai', function () {

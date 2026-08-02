@@ -47,10 +47,14 @@ function goiMonDon(TableSession $luot, Product $mon, ProductVariant $bienThe, in
         'uuid' => (string) Str::uuid(),
         'items' => [
             [
+                'uuid' => (string) Str::uuid(),
                 'product_id' => $mon->id,
                 'product_variant_id' => $bienThe->id,
                 'quantity' => $soLuong,
-                'option_ids' => $optionIds,
+                'options' => array_map(
+                    fn (int $optionId): array => ['option_id' => $optionId, 'uuid' => (string) Str::uuid()],
+                    $optionIds
+                ),
             ],
         ],
     ];
@@ -203,8 +207,8 @@ it('M7: trộn món bếp và món quầy trong một lần gửi thì bị ch�
     $payload = [
         'uuid' => (string) Str::uuid(),
         'items' => [
-            ['product_id' => $this->mon->id, 'product_variant_id' => $this->bienThe->id, 'quantity' => 1],
-            ['product_id' => $monBar->id, 'product_variant_id' => $bienTheBar->id, 'quantity' => 1],
+            ['uuid' => (string) Str::uuid(), 'product_id' => $this->mon->id, 'product_variant_id' => $this->bienThe->id, 'quantity' => 1],
+            ['uuid' => (string) Str::uuid(), 'product_id' => $monBar->id, 'product_variant_id' => $bienTheBar->id, 'quantity' => 1],
         ],
     ];
 

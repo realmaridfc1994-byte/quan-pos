@@ -27,6 +27,7 @@ it('Owner mở bàn thành công, ngay sau đó Kitchen bị chặn khi gọi C�
     $banB = DiningTable::factory()->create();
 
     $moBan = fn (array $headers, DiningTable $ban) => test()->postJson('/api/v1/table-sessions', [
+        'uuid' => (string) Str::uuid(),
         'dining_table_ids' => [$ban->id],
         'primary_dining_table_id' => $ban->id,
         'guest_count' => 2,

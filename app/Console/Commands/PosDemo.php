@@ -15,13 +15,17 @@ use App\Domain\Ordering\Actions\CancelOrderItem;
 use App\Domain\Ordering\Actions\OpenTableSession;
 use App\Domain\Ordering\Actions\PlaceOrder;
 use App\Domain\Ordering\Actions\SendToKitchen;
+use App\Domain\Ordering\Actions\SplitTableSession;
 use App\Domain\Ordering\Actions\UpdateOrderItemStatus;
+use App\Domain\Ordering\Actions\VoidTableSession;
 use App\Domain\Ordering\DTO\CancelOrderItemData;
 use App\Domain\Ordering\DTO\OpenTableSessionData;
 use App\Domain\Ordering\DTO\PlaceOrderData;
 use App\Domain\Ordering\DTO\PlaceOrderItemData;
 use App\Domain\Ordering\DTO\SendToKitchenData;
+use App\Domain\Ordering\DTO\SplitTableSessionData;
 use App\Domain\Ordering\DTO\UpdateOrderItemStatusData;
+use App\Domain\Ordering\DTO\VoidTableSessionData;
 use App\Domain\Ordering\Models\DiningTable;
 use App\Domain\Ordering\Models\Order;
 use App\Domain\Ordering\Models\TableSession;
@@ -51,7 +55,7 @@ use Symfony\Component\Console\Command\Command as CommandAlias;
  */
 final class PosDemo extends Command
 {
-    protected $signature = 'pos:demo {--den=dong-ca : Mốc dừng lại — "ca", "ban", "goi-mon", "gui-bep", "huy-mon", "thu-tien" hoặc "dong-ca" (mặc định — chạy trọn vẹn)}';
+    protected $signature = 'pos:demo {--den=dong-ca : Mốc dừng lại — "ca", "ban", "goi-mon", "gui-bep", "tach-ban", "huy-mon", "thu-tien" hoặc "dong-ca" (mặc định — chạy trọn vẹn)}';
 
     protected $description = 'Diễn tập một ca bán hàng mẫu, dùng để tự kiểm tra bằng mắt (chỉ chạy ở môi trường local)';
 
@@ -64,6 +68,7 @@ final class PosDemo extends Command
         PlaceOrder $goiMon,
         SendToKitchen $guiBep,
         UpdateOrderItemStatus $capNhatTrangThaiMon,
+        SplitTableSession $tachBan,
         CancelOrderItem $huyMon,
         RecordPayment $thuTien,
         CloseShift $dongCa,
@@ -75,7 +80,7 @@ final class PosDemo extends Command
         }
 
         $den = $this->option('den');
-        $cacMoc = ['ca', 'ban', 'goi-mon', 'gui-bep', 'huy-mon', 'thu-tien', 'dong-ca'];
+        $cacMoc = ['ca', 'ban', 'goi-mon', 'gui-bep', 'tach-ban', 'huy-mon', 'thu-tien', 'dong-ca'];
 
         if (! in_array($den, $cacMoc, true)) {
             $this->line("<fg=red>❌ Chưa hỗ trợ --den={$den}. Bước này chỉ hỗ trợ --den=".implode(', --den=', $cacMoc).'.</>');
@@ -90,16 +95,20 @@ final class PosDemo extends Command
         try {
             [$thuNgan, $ca] = $this->dienTapMoCa($moCa);
 
-            if (in_array($den, ['ban', 'goi-mon', 'gui-bep', 'huy-mon', 'thu-tien', 'dong-ca'], true)) {
+            if (in_array($den, ['ban', 'goi-mon', 'gui-bep', 'tach-ban', 'huy-mon', 'thu-tien', 'dong-ca'], true)) {
                 $luotKhach = $this->dienTapMoBan($moBan);
             }
 
-            if (in_array($den, ['goi-mon', 'gui-bep', 'huy-mon', 'thu-tien', 'dong-ca'], true)) {
+            if (in_array($den, ['goi-mon', 'gui-bep', 'tach-ban', 'huy-mon', 'thu-tien', 'dong-ca'], true)) {
                 $phieux = $this->dienTapGoiMon($goiMon, $luotKhach);
             }
 
-            if (in_array($den, ['gui-bep', 'huy-mon', 'thu-tien', 'dong-ca'], true)) {
+            if (in_array($den, ['gui-bep', 'tach-ban', 'huy-mon', 'thu-tien', 'dong-ca'], true)) {
                 $this->dienTapGuiBepVaBaoXong($guiBep, $capNhatTrangThaiMon, $phieux);
+            }
+
+            if (in_array($den, ['tach-ban', 'huy-mon', 'thu-tien', 'dong-ca'], true)) {
+                $this->dienTapTachBan($tachBan, $luotKhach, $phieux[1], $thuNgan);
             }
 
             if (in_array($den, ['huy-mon', 'thu-tien', 'dong-ca'], true)) {
@@ -176,6 +185,7 @@ final class PosDemo extends Command
         $banGhep = DiningTable::factory()->create(['code' => 'DEMO-2', 'name' => 'Bàn diễn tập 2']);
 
         $luotKhach = $moBan->handle(new OpenTableSessionData(
+            uuid: (string) Str::uuid(),
             diningTableIds: [$banChinh->id, $banGhep->id],
             primaryDiningTableId: $banChinh->id,
             guestCount: 6,
@@ -213,7 +223,7 @@ final class PosDemo extends Command
         $phieuBep = $goiMon->handle(new PlaceOrderData(
             uuid: (string) Str::uuid(),
             tableSessionId: $luotKhach->id,
-            items: [new PlaceOrderItemData($monBep->id, $bienTheBep->id, 3, null, [])],
+            items: [new PlaceOrderItemData((string) Str::uuid(), $monBep->id, $bienTheBep->id, 3, null, [])],
             note: null,
             createdByUserId: $phucVu->id,
         ));
@@ -222,7 +232,7 @@ final class PosDemo extends Command
         $phieuQuay = $goiMon->handle(new PlaceOrderData(
             uuid: (string) Str::uuid(),
             tableSessionId: $luotKhach->id,
-            items: [new PlaceOrderItemData($monQuay->id, $bienTheQuay->id, 4, null, [])],
+            items: [new PlaceOrderItemData((string) Str::uuid(), $monQuay->id, $bienTheQuay->id, 4, null, [])],
             note: null,
             createdByUserId: $phucVu->id,
         ));
@@ -265,6 +275,43 @@ final class PosDemo extends Command
             $phieu->refresh();
             $this->line("   Phiếu {$phieu->uuid} ({$phieu->station->value}) — {$dongMon->product_name} đã xong, trạng thái phiếu: {$phieu->status->value}");
         }
+    }
+
+    /** Chuyển bàn ghép + món quầy sang một lượt khách mới — món đã gửi bếp trước đó vẫn tách được bình thường. */
+    private function dienTapTachBan(SplitTableSession $tachBan, TableSession $luotKhach, Order $phieuQuay, User $thuNgan): void
+    {
+        $this->mocHienTai = 'TÁCH BÀN';
+        $this->newLine();
+        $this->line('<fg=cyan;options=bold>TÁCH BÀN</>');
+
+        $banGhep = $luotKhach->tables()->whereNull('detached_at')->where('is_primary', false)->sole()->diningTable;
+        $dongBia = $phieuQuay->items()->sole();
+
+        $tamTinhTruoc = Money::fromInt($luotKhach->refresh()->subtotal_amount);
+        $this->line("   Tạm tính trước khi tách: {$tamTinhTruoc->format()}");
+        $this->line("   Tách bàn {$banGhep->code} và món {$dongBia->product_name} (đã gửi bếp/quầy) sang lượt khách mới");
+
+        $ketQua = $tachBan->handle(new SplitTableSessionData(
+            sourceTableSessionId: $luotKhach->id,
+            orderItemIds: [$dongBia->id],
+            diningTableIds: [$banGhep->id],
+            guestCount: 2,
+            actorUserId: $thuNgan->id,
+        ));
+
+        $tamTinhCu = Money::fromInt($ketQua['source']->subtotal_amount);
+        $tamTinhMoi = Money::fromInt($ketQua['new']->subtotal_amount);
+        $this->line("   Sau khi tách — lượt cũ {$ketQua['source']->code}: {$tamTinhCu->format()}, lượt mới {$ketQua['new']->code}: {$tamTinhMoi->format()}");
+        $this->line('   Tổng hai bên: '.$tamTinhCu->plus($tamTinhMoi)->format().' (phải bằng tạm tính trước khi tách)');
+
+        // Dọn lượt khách mới để ca có thể đóng ở bước cuối cùng của bài diễn tập
+        // (C3: không đóng được ca khi còn lượt khách đang mở). Trong thực tế
+        // lượt khách này sẽ bán tiếp và thu tiền bình thường như mọi lượt khác.
+        app(VoidTableSession::class)->handle(new VoidTableSessionData(
+            tableSessionId: $ketQua['new']->id,
+            reason: 'Dọn dữ liệu diễn tập — chỉ minh hoạ thao tác tách bàn',
+            voidedByUserId: $thuNgan->id,
+        ));
     }
 
     private function dienTapHuyMon(CancelOrderItem $huyMon, TableSession $luotKhach, User $thuNgan, Order $phieuBep): void

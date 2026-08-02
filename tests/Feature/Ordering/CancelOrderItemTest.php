@@ -102,6 +102,38 @@ it('H4: huỷ 1 trong 5 — tách thành dòng còn 4 (giữ nguyên) và dòng 
     expect($this->luot->refresh()->subtotal_amount)->toBe(100_000); // 4 x 25.000 còn lại
 });
 
+it('Bước 2: tách dòng từ món ĐÃ served — dòng mới kế thừa served_at của dòng gốc', function () {
+    $this->item->update(['status' => OrderItemStatus::Served, 'served_at' => now()->subMinutes(10)]);
+    // Cột served_at là DATETIME (không có phần mili-giây) — đọc lại từ DB để so
+    // sánh đúng độ chính xác đã lưu, tránh lệch mili-giây với giá trị PHP gốc.
+    $servedAtDaLuu = $this->item->refresh()->served_at;
+
+    $response = huyMon($this->owner, $this->order, $this->item, [
+        'quantity' => 1,
+        'reason' => 'Khách trả bớt',
+        'approver_user_id' => $this->thuNgan->id,
+        'approver_pin' => '1234',
+    ])->assertOk();
+
+    $dongMoi = OrderItem::query()->findOrFail($response->json('data.id'));
+    expect($dongMoi->served_at)->not->toBeNull()
+        ->and($dongMoi->served_at->equalTo($servedAtDaLuu))->toBeTrue();
+
+    expect($this->item->refresh()->served_at->equalTo($servedAtDaLuu))->toBeTrue();
+});
+
+it('Bước 2: tách dòng từ món CHƯA served — dòng mới cũng served_at = NULL', function () {
+    expect($this->item->status)->toBe(OrderItemStatus::Ordered)
+        ->and($this->item->served_at)->toBeNull();
+
+    $response = huyMon($this->owner, $this->order, $this->item, ['quantity' => 1, 'reason' => 'Khách trả bớt'])
+        ->assertOk();
+
+    $dongMoi = OrderItem::query()->findOrFail($response->json('data.id'));
+    expect($dongMoi->served_at)->toBeNull();
+    expect($this->item->refresh()->served_at)->toBeNull();
+});
+
 it('huỷ nhiều hơn số lượng còn lại thì bị chặn', function () {
     huyMon($this->owner, $this->order, $this->item, ['quantity' => 6, 'reason' => 'Test'])
         ->assertUnprocessable();

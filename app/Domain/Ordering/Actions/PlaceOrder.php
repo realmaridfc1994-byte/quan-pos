@@ -15,6 +15,7 @@ use App\Domain\Ordering\Enums\OrderStatus;
 use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\Order;
 use App\Domain\Ordering\Models\OrderItem;
+use App\Domain\Ordering\Models\OrderItemOption;
 use App\Domain\Ordering\Models\TableSession;
 use App\Exceptions\DomainException;
 use App\Support\Money;
@@ -134,6 +135,13 @@ final class PlaceOrder
 
     private function taoDongMon(Order $order, PlaceOrderItemData $item): void
     {
+        // Gửi lại đúng uuid dòng món cũ (mạng lag, bấm hai lần) thì không tạo
+        // trùng — chuẩn bị cho Bước 4 đồng bộ hàng loạt, khi một phiếu có thể
+        // được đồng bộ nhiều lần với các dòng món đến ở các đợt khác nhau.
+        if (OrderItem::query()->where('uuid', $item->uuid)->exists()) {
+            return;
+        }
+
         $product = Product::query()->findOrFail($item->productId);
         $variant = ProductVariant::query()->findOrFail($item->productVariantId);
 
@@ -147,11 +155,18 @@ final class PlaceOrder
         );
 
         $orderItem = OrderItem::query()->create([
+            'uuid' => $item->uuid,
             'order_id' => $order->id,
             'product_id' => $product->id,
             'product_variant_id' => $variant->id,
             'product_name' => $product->name,
             'variant_name' => $variant->name,
+            // SERVER LUÔN TỰ TÍNH LẠI GIÁ từ bảng thực đơn của mình (product_variants),
+            // không bao giờ nhận giá từ máy POS. Khi Phase 2 làm đồng bộ, nếu máy POS
+            // offline có gửi kèm giá đã thấy lúc gọi món thì giá đó CHỈ dùng để so sánh
+            // và cảnh báo lệch (thực đơn vừa đổi giá khi máy đang offline), TUYỆT ĐỐI
+            // KHÔNG dùng để ghi vào order_items — tin giá từ máy POS thì bất kỳ ai chạm
+            // được máy tính bảng đều có thể sửa được giá bill.
             'unit_price' => $variant->price,
             'options_amount' => $tienTuyChon->amount,
             'quantity' => $item->quantity,
@@ -160,7 +175,14 @@ final class PlaceOrder
         ]);
 
         foreach ($options as $tuyChon) {
+            $duocChon = collect($item->options)->firstWhere('optionId', $tuyChon->id);
+
+            if (OrderItemOption::query()->where('uuid', $duocChon->uuid)->exists()) {
+                continue;
+            }
+
             $orderItem->options()->create([
+                'uuid' => $duocChon->uuid,
                 'option_id' => $tuyChon->id,
                 'option_group_name' => $tuyChon->optionGroup->name,
                 'option_name' => $tuyChon->name,

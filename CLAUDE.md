@@ -134,7 +134,7 @@ Món hàng nào không rõ thuộc nhóm nào thì hỏi, đừng tự đoán.
 8. **Mọi phép tính tiền đi qua `App\Support\Money`.** Không `+`, `-`, `*` trực tiếp trên biến tiền trong Action hay Controller. Money tự chặn kết quả âm.
 9. **Mọi thay đổi dữ liệu liên quan tiền phải nằm trong `DB::transaction()`**: thu tiền, huỷ phiếu thu, giảm giá, đóng lượt khách, đóng ca, tính lại tổng tiền. Trong transaction phải `lockForUpdate()` dòng `table_sessions` hoặc `shifts` liên quan trước khi đọc để tính.
 10. **Số tiền trên hoá đơn được chốt, không tính lại về sau.** `order_items` luôn lưu bản sao `product_name`, `variant_name`, `unit_price`. Sửa giá trong thực đơn **không** được làm đổi một chữ nào trên hoá đơn cũ.
-11. **Mọi Action đụng tiền khoá theo đúng một thứ tự chung: `Shift` → `TableSession` → `Payment`.** Khoá ngược thứ tự nhau giữa hai Action là kẹt chéo (deadlock) — MySQL tự phát hiện và huỷ một bên, nhưng thu ngân nhận lỗi khó hiểu. Cần khoá nhiều dòng `Shift` cùng lúc thì khoá theo `id` tăng dần, giống quy tắc khoá nhiều bàn ở luật 17.
+11. **Mọi Action đụng tiền khoá theo đúng một thứ tự chung: `Payment` → `TableSession` → `Shift` → `DiningTable`.** (Sửa ngày 02/08 sau kiểm toán Phase 2 Bước 0/2: luật cũ ghi `Shift → TableSession → Payment` là SAI — code đang chạy nhất quán theo thứ tự ngược lại từ trước giờ và không có vòng kẹt nào; đổi luật cho khớp thực tế, không sửa code.) Khoá ngược thứ tự nhau giữa hai Action là kẹt chéo (deadlock) — MySQL tự phát hiện và huỷ một bên, nhưng thu ngân nhận lỗi khó hiểu. `DiningTable` luôn khoá SAU CÙNG. Cần khoá nhiều dòng cùng loại (nhiều `Shift`, nhiều `DiningTable`...) thì khoá theo `id` tăng dần, giống quy tắc khoá nhiều bàn ở luật 17.
 
 ### Dữ liệu
 

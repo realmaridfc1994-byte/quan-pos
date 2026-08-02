@@ -31,6 +31,7 @@ function guiYeuCauMoBan(User $user, DiningTable $ban): TestResponse
     $token = $user->createToken('pos-app')->plainTextToken;
 
     return test()->postJson('/api/v1/table-sessions', [
+        'uuid' => (string) Str::uuid(),
         'dining_table_ids' => [$ban->id],
         'primary_dining_table_id' => $ban->id,
         'guest_count' => 2,
@@ -59,6 +60,33 @@ it('B1: hai người cùng bấm mở một bàn — đúng một thành công, 
     $daThatBai->first()->assertJsonPath('message', 'Bàn này đang có khách.');
 
     expect(TableSession::query()->count())->toBe(1);
+});
+
+it('Bước 2: hai người mở bàn khác nhau gần như cùng lúc — cả hai thành công, mã lượt khách KHÁC NHAU, đúng định dạng', function () {
+    Shift::factory()->open()->create();
+    $banA = DiningTable::factory()->create();
+    $banB = DiningTable::factory()->create();
+
+    $anhNam = User::factory()->staff()->create();
+    $chiLan = User::factory()->staff()->create();
+
+    $ketQuaNam = guiYeuCauMoBan($anhNam, $banA)->assertCreated();
+    $ketQuaLan = guiYeuCauMoBan($chiLan, $banB)->assertCreated();
+
+    $maNam = $ketQuaNam->json('data.code');
+    $maLan = $ketQuaLan->json('data.code');
+    $homNay = now()->format('Ymd');
+
+    expect($maNam)->not->toBe($maLan)
+        ->and($maNam)->toMatch('/^PH-'.$homNay.'-\d+$/')
+        ->and($maLan)->toMatch('/^PH-'.$homNay.'-\d+$/')
+        ->and(TableSession::query()->distinct()->count('code'))->toBe(2);
+
+    // Không bản ghi nào còn giữ mã tạm (uuid cắt còn 30 ký tự) sau khi
+    // transaction xong.
+    foreach (TableSession::query()->pluck('code') as $ma) {
+        expect($ma)->toMatch('/^PH-'.$homNay.'-\d+$/');
+    }
 });
 
 it('B1 (chốt DB cuối cùng): uq_tst_one_session_per_table chặn hai dòng "đang chiếm" cùng một bàn dù bỏ qua tầng ứng dụng', function () {

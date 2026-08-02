@@ -105,6 +105,12 @@ final class CancelOrderItem
             'unit_price' => $item->unit_price,
             'options_amount' => $item->options_amount,
             'quantity' => $data->quantity,
+            // Kế thừa served_at của dòng gốc: Phase 3 đọc cột này để biết nguyên
+            // liệu đã dùng hay chưa — món đã bưng ra bàn (served_at có giá trị)
+            // rồi mới bị trả một phần thì phần bị huỷ đó vẫn là phần ĐÃ DÙNG,
+            // không phải chưa phục vụ. Để NULL ở đây sẽ hoàn kho nhầm một lon
+            // bia đã uống (xem docs/kiem-toan-offline.md mục 5).
+            'served_at' => $item->served_at,
             'status' => OrderItemStatus::Cancelled,
             'cancelled_at' => now(),
             'cancelled_by_user_id' => $data->cancelledByUserId,

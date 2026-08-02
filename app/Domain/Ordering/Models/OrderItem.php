@@ -25,6 +25,7 @@ final class OrderItem extends Model
     }
 
     protected $fillable = [
+        'uuid',
         'order_id',
         'product_id',
         'product_variant_id',

@@ -10,6 +10,7 @@ use App\Domain\Ordering\Models\Order;
 use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Staffing\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
 
 /**
  * @extends Factory<OrderItem>
@@ -23,6 +24,7 @@ class OrderItemFactory extends Factory
         $variant = ProductVariant::factory()->create();
 
         return [
+            'uuid' => (string) Str::uuid(),
             'order_id' => Order::factory(),
             'product_id' => $variant->product_id,
             'product_variant_id' => $variant->id,

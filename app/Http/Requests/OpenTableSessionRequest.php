@@ -18,6 +18,7 @@ final class OpenTableSessionRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'uuid' => ['required', 'uuid'],
             'dining_table_ids' => ['required', 'array', 'min:1'],
             'dining_table_ids.*' => ['integer', 'distinct', 'exists:dining_tables,id'],
             'primary_dining_table_id' => ['required', 'integer'],
@@ -29,6 +30,7 @@ final class OpenTableSessionRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'uuid.required' => 'Thiếu mã vân tay của lượt khách.',
             'dining_table_ids.required' => 'Phải chọn ít nhất một bàn.',
             'dining_table_ids.min' => 'Phải chọn ít nhất một bàn.',
             'dining_table_ids.*.distinct' => 'Một bàn không được chọn hai lần.',

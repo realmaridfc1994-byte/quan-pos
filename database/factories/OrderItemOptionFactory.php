@@ -8,6 +8,7 @@ use App\Domain\Catalog\Models\Option;
 use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Ordering\Models\OrderItemOption;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
 
 /**
  * @extends Factory<OrderItemOption>
@@ -21,6 +22,7 @@ class OrderItemOptionFactory extends Factory
         $option = Option::factory()->create();
 
         return [
+            'uuid' => (string) Str::uuid(),
             'order_item_id' => OrderItem::factory(),
             'option_id' => $option->id,
             'option_group_name' => $option->optionGroup->name,

@@ -46,6 +46,8 @@ Route::prefix('v1')->group(function (): void {
             Route::post('{tableSession}/tables', [TableSessionController::class, 'attachTable'])->middleware('idempotent');
             Route::delete('{tableSession}/tables/{diningTable}', [TableSessionController::class, 'detachTable']);
             Route::post('{tableSession}/transfer', [TableSessionController::class, 'transfer'])->middleware('idempotent');
+            Route::post('{tableSession}/split', [TableSessionController::class, 'split'])->middleware('idempotent');
+            Route::post('{tableSession}/move-items', [TableSessionController::class, 'moveItems'])->middleware('idempotent');
             Route::post('{tableSession}/close', [TableSessionController::class, 'close'])->middleware('idempotent');
             Route::post('{tableSession}/void', [TableSessionController::class, 'void'])->middleware('idempotent');
             Route::post('{tableSession}/orders', [OrderController::class, 'store'])->middleware('idempotent');

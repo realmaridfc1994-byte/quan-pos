@@ -220,6 +220,12 @@ CREATE TABLE dining_tables (
 -- 5. LƯỢT KHÁCH  (TRÁI TIM HỆ THỐNG)
 CREATE TABLE table_sessions (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+    -- Phase 2 Bước 2: "vân tay" do máy POS sinh TRƯỚC KHI gửi lên, cho phép mở
+    -- bàn khi offline mà không đụng dữ liệu với máy khác lúc đồng bộ. NULL tạm
+    -- thời cho dữ liệu cũ trước Bước 2 — xem lệnh `pos:backfill-uuid`.
+    uuid                CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+
     code                VARCHAR(30)     NOT NULL COMMENT 'Mã lượt khách: PH-20260730-0007',
     shift_id            BIGINT UNSIGNED NOT NULL COMMENT 'Lượt khách này mở trong ca nào',
 
@@ -255,6 +261,7 @@ CREATE TABLE table_sessions (
     created_at          TIMESTAMP       NULL,
     updated_at          TIMESTAMP       NULL,
     PRIMARY KEY (id),
+    UNIQUE KEY uq_table_sessions_uuid (uuid),
     UNIQUE KEY uq_table_sessions_code (code),
     UNIQUE KEY uq_table_sessions_bill_no (bill_no),
     KEY idx_table_sessions_status_opened (status, opened_at),
@@ -464,6 +471,12 @@ CREATE TABLE orders (
 -- 13. DÒNG MÓN TRÊN PHIẾU
 CREATE TABLE order_items (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+    -- Phase 2 Bước 2: vân tay do máy POS sinh, chuẩn bị cho đồng bộ hàng loạt
+    -- (Bước 4) khi một phiếu có thể được đồng bộ nhiều đợt. NULL tạm thời cho
+    -- dữ liệu cũ — xem lệnh `pos:backfill-uuid`.
+    uuid                CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+
     order_id            BIGINT UNSIGNED NOT NULL,
 
     -- Trỏ về thực đơn: dùng để thống kê và để Phase 3 trừ kho.
@@ -499,6 +512,7 @@ CREATE TABLE order_items (
     created_at          TIMESTAMP       NULL,
     updated_at          TIMESTAMP       NULL,
     PRIMARY KEY (id),
+    UNIQUE KEY uq_order_items_uuid (uuid),
     KEY idx_order_items_order (order_id, status),
     KEY idx_order_items_product_stats (product_id, created_at),
     KEY idx_order_items_variant (product_variant_id),
@@ -517,6 +531,11 @@ CREATE TABLE order_items (
 -- 14. TÙY CHỌN ĐÃ CHỌN CHO TỪNG DÒNG MÓN
 CREATE TABLE order_item_options (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+    -- Phase 2 Bước 2: vân tay do máy POS sinh. NULL tạm thời cho dữ liệu cũ —
+    -- xem lệnh `pos:backfill-uuid`.
+    uuid                CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+
     order_item_id       BIGINT UNSIGNED NOT NULL,
     option_id           BIGINT UNSIGNED NULL COMMENT 'Trỏ về thực đơn, để Phase 3 trừ kho. NULL nếu là ghi chú tự do',
 
@@ -528,6 +547,7 @@ CREATE TABLE order_item_options (
     created_at          TIMESTAMP       NULL,
     updated_at          TIMESTAMP       NULL,
     PRIMARY KEY (id),
+    UNIQUE KEY uq_order_item_options_uuid (uuid),
     KEY idx_oio_item (order_item_id),
     KEY idx_oio_option (option_id),
     CONSTRAINT fk_oio_item   FOREIGN KEY (order_item_id) REFERENCES order_items (id) ON DELETE RESTRICT,
@@ -603,6 +623,7 @@ Ký hiệu người gác: **DB** = database tự chặn · **APP** = code Larave
 | B4 | Khi lượt khách chuyển sang `closed` hoặc `void`, **mọi** bàn của nó phải được nhả (`detached_at` có giá trị). Bàn tự do ngay lập tức. | APP |
 | B5 | Không được nhả bàn cuối cùng của một lượt khách còn đang mở. Muốn nhả hết thì phải đóng lượt khách. | APP |
 | B6 | Chuyển bàn = nhả bàn cũ + chiếm bàn mới trong **cùng một giao dịch**. Không có khoảnh khắc nào lượt khách không có bàn. | APP |
+| B7 | Mỗi lượt khách có `uuid` **duy nhất toàn hệ thống**, do máy POS sinh trước khi gửi (Phase 2 Bước 2) — cho phép mở bàn khi offline. Gửi lại đúng `uuid` không mở lượt khách mới, trả về đúng lượt khách cũ. | **DB** (`uq_table_sessions_uuid`) + APP |
 
 ### Về gọi món
 
@@ -628,6 +649,7 @@ Ký hiệu người gác: **DB** = database tự chặn · **APP** = code Larave
 | M7 | Một phiếu chỉ chứa món của **một nơi làm** (bếp hoặc quầy), khớp với `station` của phiếu. | APP |
 | M8 | Chỉ thêm món được vào lượt khách đang ở trạng thái `open`. Đã in bill rồi thì phải mở lại lượt khách mới gọi thêm được. | APP |
 | M9 | Số tùy chọn chọn trong một nhóm phải nằm giữa `min_select` và `max_select`. Không thể vừa "ít đá" vừa "nhiều đá". | APP |
+| M10 | Mỗi dòng món và mỗi tuỳ chọn đã chọn có `uuid` riêng do máy POS sinh (Phase 2 Bước 2), chuẩn bị cho đồng bộ hàng loạt lúc offline (Bước 4). Server **không tự sinh** các uuid này. | **DB** (`uq_order_items_uuid`, `uq_order_item_options_uuid`) + APP |
 
 ### Về hủy — nguyên tắc "không có cục tẩy"
 

@@ -23,6 +23,11 @@ use Illuminate\Support\Facades\DB;
  *     theo id tăng dần — hai nhân viên ghép bàn theo thứ tự khác nhau không
  *     bao giờ kẹt chéo chờ nhau.
  *  3. Toàn bộ nằm trong một transaction — thành công hết hoặc không gì cả.
+ *
+ * `uuid` do máy POS sinh trước khi gửi (Phase 2 Bước 2) — gửi lại đúng uuid đó
+ * trả về đúng lượt khách cũ, không mở trùng khi mạng lag/bấm hai lần. Máy POS
+ * offline có thể tự sinh uuid ngay lúc mở bàn; `code` (mã hiển thị cho người
+ * đọc) vẫn do server gán, xem sinhMaLuotKhach().
  */
 final class OpenTableSession
 {
@@ -37,6 +42,11 @@ final class OpenTableSession
         }
 
         return DB::transaction(function () use ($data): TableSession {
+            $daCo = TableSession::query()->where('uuid', $data->uuid)->first();
+            if ($daCo !== null) {
+                return $daCo;
+            }
+
             // Khoá dòng ca TRƯỚC khi tạo lượt khách (luật CLAUDE.md mục 11: Shift →
             // TableSession) — không khoá thì đọc theo snapshot REPEATABLE READ, có
             // thể thấy ca "open" đúng lúc CloseShift đang khoá và đóng ca đó, tạo ra
@@ -73,14 +83,23 @@ final class OpenTableSession
                 }
             }
 
+            // Mã hiển thị (code) cần ID tự tăng mới sinh đúng, nhưng cột code
+            // NOT NULL + UNIQUE nên phải có giá trị ngay lúc tạo — ghi trước
+            // bằng chính uuid của bản ghi này làm mã tạm (chắc chắn không
+            // trùng ai, thoả UNIQUE ngay lúc chèn; cắt còn 30 ký tự vì cột
+            // code là VARCHAR(30), uuid đủ 36 ký tự không vừa), có id thật
+            // rồi mới gán mã thật ngay sau đó, cùng một transaction. Xem
+            // sinhMaLuotKhach().
             $tableSession = TableSession::query()->create([
-                'code' => $this->sinhMaLuotKhach(),
+                'uuid' => $data->uuid,
+                'code' => substr($data->uuid, 0, 30),
                 'shift_id' => $shift->id,
                 'guest_count' => $data->guestCount,
                 'status' => TableSessionStatus::Open,
                 'opened_by_user_id' => $data->openedByUserId,
                 'opened_at' => now(),
             ]);
+            $tableSession->update(['code' => $this->sinhMaLuotKhach($tableSession->id)]);
 
             foreach ($banDuocChon as $ban) {
                 TableSessionTable::query()->create([
@@ -96,11 +115,24 @@ final class OpenTableSession
         });
     }
 
-    private function sinhMaLuotKhach(): string
+    /**
+     * Dùng `id` tự tăng của chính lượt khách vừa tạo — không dùng `count() + 1`
+     * và không dùng số ngẫu nhiên. Hai người mở bàn cùng một giây, mỗi người
+     * vẫn nhận đúng một `id` khác nhau do MySQL tự đảm bảo, không bao giờ ra
+     * cùng một mã.
+     *
+     * Số cuối trong mã là `id` TOÀN CỤC của bản ghi, KHÔNG PHẢI "lượt khách
+     * thứ mấy trong ngày" — chấp nhận đánh đổi này: phần ngày tháng đã đủ cho
+     * biết thứ tự theo ngày, phần số chỉ cần làm nhiệm vụ phân biệt hai lượt
+     * khách mở cùng ngày, không cần đếm lại từ 0001 mỗi ngày.
+     *
+     * Không cắt bớt nếu `id` vượt quá 4 chữ số — str_pad chỉ đệm thêm, không
+     * bao giờ cắt bớt chuỗi dài hơn độ dài yêu cầu.
+     */
+    private function sinhMaLuotKhach(int $id): string
     {
         $homNay = now()->format('Ymd');
-        $soThuTu = TableSession::query()->whereDate('opened_at', now()->toDateString())->count() + 1;
 
-        return "PH-{$homNay}-".str_pad((string) $soThuTu, 4, '0', STR_PAD_LEFT);
+        return "PH-{$homNay}-".str_pad((string) $id, 4, '0', STR_PAD_LEFT);
     }
 }

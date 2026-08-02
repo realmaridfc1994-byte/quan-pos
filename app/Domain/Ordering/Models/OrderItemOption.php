@@ -21,6 +21,7 @@ final class OrderItemOption extends Model
     }
 
     protected $fillable = [
+        'uuid',
         'order_item_id',
         'option_id',
         'option_group_name',

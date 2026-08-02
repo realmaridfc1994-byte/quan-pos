@@ -110,6 +110,11 @@ CREATE TABLE dining_tables (
 -- 5. LƯỢT KHÁCH  (TRÁI TIM HỆ THỐNG)
 CREATE TABLE table_sessions (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+    -- Phase 2 Bước 2: vân tay do máy POS sinh trước khi gửi. NULL tạm thời cho
+    -- dữ liệu cũ — xem lệnh `pos:backfill-uuid`.
+    uuid                CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+
     code                VARCHAR(30)     NOT NULL COMMENT 'Mã lượt khách: PH-20260730-0007',
     shift_id            BIGINT UNSIGNED NOT NULL COMMENT 'Lượt khách này mở trong ca nào',
 
@@ -145,6 +150,7 @@ CREATE TABLE table_sessions (
     created_at          TIMESTAMP       NULL,
     updated_at          TIMESTAMP       NULL,
     PRIMARY KEY (id),
+    UNIQUE KEY uq_table_sessions_uuid (uuid),
     UNIQUE KEY uq_table_sessions_code (code),
     UNIQUE KEY uq_table_sessions_bill_no (bill_no),
     KEY idx_table_sessions_status_opened (status, opened_at),
@@ -352,6 +358,11 @@ CREATE TABLE orders (
 -- 13. DÒNG MÓN TRÊN PHIẾU
 CREATE TABLE order_items (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+    -- Phase 2 Bước 2: vân tay do máy POS sinh. NULL tạm thời cho dữ liệu cũ —
+    -- xem lệnh `pos:backfill-uuid`.
+    uuid                CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+
     order_id            BIGINT UNSIGNED NOT NULL,
 
     -- Trỏ về thực đơn: dùng để thống kê và để Phase 3 trừ kho.
@@ -386,6 +397,7 @@ CREATE TABLE order_items (
     created_at          TIMESTAMP       NULL,
     updated_at          TIMESTAMP       NULL,
     PRIMARY KEY (id),
+    UNIQUE KEY uq_order_items_uuid (uuid),
     KEY idx_order_items_order (order_id, status),
     KEY idx_order_items_product_stats (product_id, created_at),
     KEY idx_order_items_variant (product_variant_id),
@@ -404,6 +416,11 @@ CREATE TABLE order_items (
 -- 14. TÙY CHỌN ĐÃ CHỌN CHO TỪNG DÒNG MÓN
 CREATE TABLE order_item_options (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+    -- Phase 2 Bước 2: vân tay do máy POS sinh. NULL tạm thời cho dữ liệu cũ —
+    -- xem lệnh `pos:backfill-uuid`.
+    uuid                CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+
     order_item_id       BIGINT UNSIGNED NOT NULL,
     option_id           BIGINT UNSIGNED NULL COMMENT 'Trỏ về thực đơn, để Phase 3 trừ kho. NULL nếu là ghi chú tự do',
 
@@ -415,6 +432,7 @@ CREATE TABLE order_item_options (
     created_at          TIMESTAMP       NULL,
     updated_at          TIMESTAMP       NULL,
     PRIMARY KEY (id),
+    UNIQUE KEY uq_order_item_options_uuid (uuid),
     KEY idx_oio_item (order_item_id),
     KEY idx_oio_option (option_id),
     CONSTRAINT fk_oio_item   FOREIGN KEY (order_item_id) REFERENCES order_items (id) ON DELETE RESTRICT,

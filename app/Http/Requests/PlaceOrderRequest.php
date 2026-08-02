@@ -21,12 +21,14 @@ final class PlaceOrderRequest extends FormRequest
             'uuid' => ['required', 'uuid'],
             'note' => ['nullable', 'string', 'max:500'],
             'items' => ['required', 'array', 'min:1'],
+            'items.*.uuid' => ['required', 'uuid', 'distinct'],
             'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
             'items.*.product_variant_id' => ['required', 'integer', 'exists:product_variants,id'],
             'items.*.quantity' => ['required', 'integer', 'min:1'],
             'items.*.note' => ['nullable', 'string', 'max:255'],
-            'items.*.option_ids' => ['nullable', 'array'],
-            'items.*.option_ids.*' => ['integer', 'exists:options,id'],
+            'items.*.options' => ['nullable', 'array'],
+            'items.*.options.*.uuid' => ['required', 'uuid', 'distinct'],
+            'items.*.options.*.option_id' => ['required', 'integer', 'exists:options,id'],
         ];
     }
 
@@ -37,6 +39,8 @@ final class PlaceOrderRequest extends FormRequest
             'uuid.required' => 'Thiếu mã vân tay của phiếu gọi món.',
             'items.required' => 'Phải gọi ít nhất một món.',
             'items.min' => 'Phải gọi ít nhất một món.',
+            'items.*.uuid.required' => 'Thiếu mã vân tay của dòng món.',
+            'items.*.options.*.uuid.required' => 'Thiếu mã vân tay của tuỳ chọn đã chọn.',
         ];
     }
 }

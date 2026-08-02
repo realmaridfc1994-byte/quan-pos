@@ -40,6 +40,18 @@ final class TableSessionPolicy
         return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
     }
 
+    /** Tách lượt khách đang mở thành hai. */
+    public function splitTableSession(User $user, TableSession $tableSession): bool
+    {
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
+    }
+
+    /** Chuyển dòng món sang một lượt khách đang mở khác. */
+    public function moveItems(User $user, TableSession $tableSession): bool
+    {
+        return in_array($user->role, [UserRole::Owner, UserRole::Cashier, UserRole::Staff], true);
+    }
+
     /**
      * Giảm giá trên hoá đơn.
      * Chủ quán giảm bao nhiêu cũng được, thu ngân tối đa 20%, nhân viên không được giảm.

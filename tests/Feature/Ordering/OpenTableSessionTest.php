@@ -21,6 +21,7 @@ function moBan(User $user, array $payload = []): TestResponse
     $ban = $payload['dining_table_ids'] ?? [DiningTable::factory()->create()->id];
 
     return test()->postJson('/api/v1/table-sessions', array_merge([
+        'uuid' => (string) Str::uuid(),
         'dining_table_ids' => $ban,
         'primary_dining_table_id' => $ban[0] ?? 0,
         'guest_count' => 4,
@@ -127,6 +128,29 @@ it('mã lượt khách đúng định dạng PH-yyyymmdd-NNNN', function () {
     $luot = TableSession::query()->sole();
     expect($luot->code)->toStartWith('PH-'.now()->format('Ymd').'-')
         ->and($luot->status)->toBe(TableSessionStatus::Open);
+});
+
+it('Bước 2: mở 5 lượt khách liên tiếp — cả 5 mã đúng định dạng PH-{Ymd}-{số}, đúng ngày hôm nay, không trùng nhau, không còn giữ mã tạm bằng uuid', function () {
+    $staff = User::factory()->staff()->create();
+    $homNay = now()->format('Ymd');
+    $maDaMo = [];
+
+    for ($i = 0; $i < 5; $i++) {
+        $response = moBan($staff)->assertCreated();
+        $ma = $response->json('data.code');
+
+        expect($ma)->toMatch('/^PH-'.$homNay.'-\d+$/');
+        $maDaMo[] = $ma;
+    }
+
+    expect($maDaMo)->toHaveCount(5)
+        ->and(array_unique($maDaMo))->toHaveCount(5);
+
+    // Không bản ghi nào còn giữ mã tạm (uuid cắt còn 30 ký tự) sau khi
+    // transaction xong — mọi code trong bảng đều đúng định dạng PH-Ymd-số.
+    foreach (TableSession::query()->pluck('code') as $ma) {
+        expect($ma)->toMatch('/^PH-'.$homNay.'-\d+$/');
+    }
 });
 
 it('không có lượt khách nào thì đóng ca thành công', function () {

@@ -8,6 +8,7 @@ final readonly class PlaceOrderItemData
 {
     /** @param list<PlaceOrderItemOptionData> $options */
     public function __construct(
+        public string $uuid,
         public int $productId,
         public int $productVariantId,
         public int $quantity,

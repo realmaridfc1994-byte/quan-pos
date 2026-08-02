@@ -21,13 +21,17 @@ final readonly class PlaceOrderData
     {
         $items = array_map(
             fn (array $item): PlaceOrderItemData => new PlaceOrderItemData(
+                uuid: (string) $item['uuid'],
                 productId: (int) $item['product_id'],
                 productVariantId: (int) $item['product_variant_id'],
                 quantity: (int) $item['quantity'],
                 note: $item['note'] ?? null,
                 options: array_map(
-                    fn (int $optionId): PlaceOrderItemOptionData => new PlaceOrderItemOptionData(optionId: $optionId),
-                    $item['option_ids'] ?? []
+                    fn (array $option): PlaceOrderItemOptionData => new PlaceOrderItemOptionData(
+                        uuid: (string) $option['uuid'],
+                        optionId: (int) $option['option_id'],
+                    ),
+                    $item['options'] ?? []
                 ),
             ),
             $request->input('items', [])

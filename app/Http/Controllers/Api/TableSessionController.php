@@ -9,13 +9,17 @@ use App\Domain\Billing\DTO\CalculateBillData;
 use App\Domain\Ordering\Actions\AttachTable;
 use App\Domain\Ordering\Actions\CloseTableSession;
 use App\Domain\Ordering\Actions\DetachTable;
+use App\Domain\Ordering\Actions\MoveOrderItem;
 use App\Domain\Ordering\Actions\OpenTableSession;
+use App\Domain\Ordering\Actions\SplitTableSession;
 use App\Domain\Ordering\Actions\TransferTable;
 use App\Domain\Ordering\Actions\VoidTableSession;
 use App\Domain\Ordering\DTO\AttachTableData;
 use App\Domain\Ordering\DTO\CloseTableSessionData;
 use App\Domain\Ordering\DTO\DetachTableData;
+use App\Domain\Ordering\DTO\MoveOrderItemData;
 use App\Domain\Ordering\DTO\OpenTableSessionData;
+use App\Domain\Ordering\DTO\SplitTableSessionData;
 use App\Domain\Ordering\DTO\TransferTableData;
 use App\Domain\Ordering\DTO\VoidTableSessionData;
 use App\Domain\Ordering\Models\DiningTable;
@@ -26,7 +30,9 @@ use App\Http\Requests\AttachTableRequest;
 use App\Http\Requests\CalculateBillRequest;
 use App\Http\Requests\CloseTableSessionRequest;
 use App\Http\Requests\DetachTableRequest;
+use App\Http\Requests\MoveOrderItemRequest;
 use App\Http\Requests\OpenTableSessionRequest;
+use App\Http\Requests\SplitTableSessionRequest;
 use App\Http\Requests\TransferTableRequest;
 use App\Http\Requests\VoidTableSessionRequest;
 use App\Http\Resources\TableSessionResource;
@@ -75,6 +81,32 @@ final class TableSessionController extends Controller
         return $this->tra($tableSession);
     }
 
+    /** POST /api/v1/table-sessions/{tableSession}/split */
+    public function split(SplitTableSessionRequest $request, TableSession $tableSession, SplitTableSession $action): JsonResponse
+    {
+        $ketQua = $action->handle(SplitTableSessionData::fromRequest($request));
+
+        return response()->json([
+            'data' => [
+                'source' => TableSessionResource::make($ketQua['source']->fresh()->load($this->taiChoHaiLuot())),
+                'new' => TableSessionResource::make($ketQua['new']->fresh()->load($this->taiChoHaiLuot())),
+            ],
+        ], Response::HTTP_CREATED);
+    }
+
+    /** POST /api/v1/table-sessions/{tableSession}/move-items */
+    public function moveItems(MoveOrderItemRequest $request, TableSession $tableSession, MoveOrderItem $action): JsonResponse
+    {
+        $ketQua = $action->handle(MoveOrderItemData::fromRequest($request));
+
+        return response()->json([
+            'data' => [
+                'source' => TableSessionResource::make($ketQua['source']->fresh()->load($this->taiChoHaiLuot())),
+                'target' => TableSessionResource::make($ketQua['target']->fresh()->load($this->taiChoHaiLuot())),
+            ],
+        ]);
+    }
+
     /** POST /api/v1/table-sessions/{tableSession}/close */
     public function close(CloseTableSessionRequest $request, TableSession $tableSession, CloseTableSession $action): JsonResponse
     {
@@ -104,5 +136,11 @@ final class TableSessionController extends Controller
         return response()->json([
             'data' => TableSessionResource::make($tableSession->fresh()->load(['openedBy', 'tables.diningTable'])),
         ], $status);
+    }
+
+    /** @return array<int, string> */
+    private function taiChoHaiLuot(): array
+    {
+        return ['openedBy', 'tables.diningTable', 'orders.items.options'];
     }
 }

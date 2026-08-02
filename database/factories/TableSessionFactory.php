@@ -10,6 +10,7 @@ use App\Domain\Ordering\Models\TableSessionTable;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
 
 /**
  * @extends Factory<TableSession>
@@ -18,10 +19,40 @@ class TableSessionFactory extends Factory
 {
     protected $model = TableSession::class;
 
+    /**
+     * Đúng thứ tự y hệt OpenTableSession::handle() thật: ghi trước bằng mã
+     * tạm duy nhất (ở đây dùng luôn uuid), có id thật rồi mới gán mã thật
+     * theo định dạng PH-{Ymd}-{id} — xem OpenTableSession::sinhMaLuotKhach().
+     * Không dùng numerify() sinh số ngẫu nhiên rời rạc như trước, vì mã đó
+     * không phải mã thật máy sẽ sinh ra, gây hiểu nhầm khi tra bằng tinker.
+     *
+     * CHỈ tự sinh khi `code` vẫn còn nguyên dạng mã tạm (30 ký tự đầu của một
+     * uuid) — nếu người gọi factory tự truyền `code` riêng (ví dụ test cần
+     * một mã cố định để so khớp thông báo lỗi), giữ nguyên giá trị đó.
+     */
+    public function configure(): static
+    {
+        return $this->afterCreating(function (TableSession $tableSession) {
+            if (! preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{6}$/i', (string) $tableSession->code)) {
+                return;
+            }
+
+            $tableSession->update([
+                'code' => 'PH-'.now()->format('Ymd').'-'.str_pad((string) $tableSession->id, 4, '0', STR_PAD_LEFT),
+            ]);
+        });
+    }
+
     public function definition(): array
     {
+        $uuid = (string) Str::uuid();
+
         return [
-            'code' => 'PH-'.fake()->unique()->numerify('##########'),
+            'uuid' => $uuid,
+            // Mã tạm — cột code là VARCHAR(30), uuid 36 ký tự không vừa nên
+            // cắt bớt, chỉ cần duy nhất trong khoảnh khắc trước khi configure()
+            // ở trên gán lại mã thật.
+            'code' => substr($uuid, 0, 30),
             'shift_id' => Shift::factory(),
             'guest_count' => fake()->numberBetween(1, 10),
             'status' => TableSessionStatus::Open,

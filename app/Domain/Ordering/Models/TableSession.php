@@ -25,6 +25,7 @@ final class TableSession extends Model
     }
 
     protected $fillable = [
+        'uuid',
         'code',
         'shift_id',
         'guest_count',

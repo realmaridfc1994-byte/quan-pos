@@ -39,7 +39,7 @@ function taoPhieuGoiMon(TableSession $luot, User $staff, Station $tram): Order
 
     $response = test()->postJson("/api/v1/table-sessions/{$luot->id}/orders", [
         'uuid' => (string) Str::uuid(),
-        'items' => [['product_id' => $product->id, 'product_variant_id' => $variant->id, 'quantity' => 1]],
+        'items' => [['uuid' => (string) Str::uuid(), 'product_id' => $product->id, 'product_variant_id' => $variant->id, 'quantity' => 1]],
     ], array_merge(authHeaderFor($staff), ['Idempotency-Key' => (string) Str::uuid()]))->assertCreated();
 
     return Order::query()->findOrFail($response->json('data.id'));
