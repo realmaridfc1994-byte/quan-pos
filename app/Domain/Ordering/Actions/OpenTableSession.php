@@ -12,6 +12,7 @@ use App\Domain\Ordering\Models\TableSessionTable;
 use App\Domain\Staffing\Enums\ShiftStatus;
 use App\Domain\Staffing\Models\Shift;
 use App\Exceptions\DomainException;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -99,7 +100,7 @@ final class OpenTableSession
                 'opened_by_user_id' => $data->openedByUserId,
                 'opened_at' => now(),
             ]);
-            $tableSession->update(['code' => $this->sinhMaLuotKhach($tableSession->id)]);
+            $tableSession->update(['code' => $this->sinhMaLuotKhach($tableSession->id, $tableSession->opened_at)]);
 
             foreach ($banDuocChon as $ban) {
                 TableSessionTable::query()->create([
@@ -128,11 +129,17 @@ final class OpenTableSession
      *
      * Không cắt bớt nếu `id` vượt quá 4 chữ số — str_pad chỉ đệm thêm, không
      * bao giờ cắt bớt chuỗi dài hơn độ dài yêu cầu.
+     *
+     * `$openedAt` PHẢI là thời điểm khách vào bàn (`opened_at`), KHÔNG PHẢI
+     * `now()` lúc câu lệnh này chạy. Máy POS offline có thể ghi cục bộ lúc
+     * 23:50 rồi chỉ đồng bộ lên server lúc 00:10 hôm sau; nếu lấy `now()` ở
+     * đây, lượt khách đó bị gắn nhầm sang ngày hôm sau dù doanh thu thuộc
+     * đêm hôm trước, làm đối soát sổ sách theo ngày bị lệch.
      */
-    private function sinhMaLuotKhach(int $id): string
+    private function sinhMaLuotKhach(int $id, Carbon $openedAt): string
     {
-        $homNay = now()->format('Ymd');
+        $ngay = $openedAt->format('Ymd');
 
-        return "PH-{$homNay}-".str_pad((string) $id, 4, '0', STR_PAD_LEFT);
+        return "PH-{$ngay}-".str_pad((string) $id, 4, '0', STR_PAD_LEFT);
     }
 }

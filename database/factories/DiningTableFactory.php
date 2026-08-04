@@ -14,10 +14,17 @@ class DiningTableFactory extends Factory
 {
     protected $model = DiningTable::class;
 
+    /**
+     * Bộ đếm tăng dần, KHÔNG dùng số ngẫu nhiên — xem luật CLAUDE.md mục 22.
+     * Tiền tố `T` cố ý khác `B`/`S` mà indoorTable()/outsideTable() dùng, để
+     * mã tự sinh không bao giờ đụng mã cố định ai đó truyền tay trong test.
+     */
+    private static int $sequence = 0;
+
     public function definition(): array
     {
         return [
-            'code' => fake()->unique()->numerify('B##'),
+            'code' => 'T'.str_pad((string) ++self::$sequence, 4, '0', STR_PAD_LEFT),
             'name' => fake()->word(),
             'area' => 'Trong nhà',
             'seats' => 4,

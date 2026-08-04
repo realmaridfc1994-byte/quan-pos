@@ -22,6 +22,12 @@ final class CancelOrderItemRequest extends FormRequest
             'reason' => ['required', 'string', 'max:255'],
             'approver_user_id' => ['nullable', 'integer', 'exists:users,id'],
             'approver_pin' => ['nullable', 'string'],
+            // Bắt buộc khi huỷ MỘT PHẦN (tách dòng mới) — Action tự kiểm tra
+            // theo quy tắc nghiệp vụ (so quantity với dòng gốc), FormRequest
+            // chỉ kiểm tra đúng hình dạng dữ liệu.
+            'new_item_uuid' => ['nullable', 'uuid'],
+            'option_uuids' => ['nullable', 'array'],
+            'option_uuids.*' => ['uuid'],
         ];
     }
 
@@ -31,6 +37,8 @@ final class CancelOrderItemRequest extends FormRequest
         return [
             'reason.required' => 'Phải ghi rõ lý do huỷ món.',
             'quantity.min' => 'Số lượng huỷ phải lớn hơn 0.',
+            'new_item_uuid.uuid' => 'Mã vân tay dòng món mới không đúng định dạng uuid.',
+            'option_uuids.*.uuid' => 'Mã vân tay tuỳ chọn không đúng định dạng uuid.',
         ];
     }
 }

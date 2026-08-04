@@ -15,11 +15,18 @@ class OptionFactory extends Factory
 {
     protected $model = Option::class;
 
+    /**
+     * Bộ đếm tăng dần, KHÔNG dùng số ngẫu nhiên — xem luật CLAUDE.md mục 22.
+     * Chống đụng uq_options_group_name (option_group_id, name) khi nhiều
+     * tuỳ chọn được tạo trong cùng một nhóm mà không tự đặt tên riêng.
+     */
+    private static int $sequence = 0;
+
     public function definition(): array
     {
         return [
             'option_group_id' => OptionGroup::factory(),
-            'name' => fake()->word(),
+            'name' => 'Tuỳ chọn '.++self::$sequence,
             'price_delta' => 0,
             'is_default' => false,
             'sort_order' => 0,

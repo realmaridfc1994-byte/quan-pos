@@ -26,6 +26,11 @@ use Illuminate\Support\Facades\DB;
  * đã lọc status != cancelled từ Bước 4, không cần làm gì thêm ở đây).
  * H5: món đã "served" bắt buộc có PIN duyệt của chủ quán/thu ngân — gọi lại
  * VerifyApproverPin (Bước 1), không viết lại logic khoá/chống dò PIN.
+ *
+ * Huỷ MỘT PHẦN (H4) tạo ra một dòng order_items MỚI và sao chép các dòng
+ * order_item_options của nó — cả hai loại bản ghi này nhận uuid do MÁY POS
+ * gửi lên (Phase 2 Bước 2, giống PlaceOrder), vì bấm huỷ cũng là thao tác
+ * nhân viên cần chống tạo trùng khi mạng lag/bấm hai lần.
  */
 final class CancelOrderItem
 {
@@ -93,10 +98,22 @@ final class CancelOrderItem
 
     private function tachVaHuyMotPhan(OrderItem $item, CancelOrderItemData $data, string $lyDo): OrderItem
     {
+        if ($data->newItemUuid === null) {
+            throw new DomainException('Huỷ một phần phải kèm uuid do máy POS sinh cho dòng món mới.');
+        }
+
+        // Bấm huỷ hai lần vì mạng lag: trả lại đúng dòng đã tách lần đầu,
+        // không trừ số lượng và không tách thêm lần nữa.
+        $daTachRoi = OrderItem::query()->where('uuid', $data->newItemUuid)->first();
+        if ($daTachRoi !== null) {
+            return $daTachRoi;
+        }
+
         $soLuongConLai = $item->quantity - $data->quantity;
         $item->update(['quantity' => $soLuongConLai]);
 
         $dongMoi = OrderItem::query()->create([
+            'uuid' => $data->newItemUuid,
             'order_id' => $item->order_id,
             'product_id' => $item->product_id,
             'product_variant_id' => $item->product_variant_id,
@@ -120,7 +137,13 @@ final class CancelOrderItem
         ]);
 
         foreach ($item->options as $tuyChon) {
+            $uuidTuyChon = $data->optionUuids[$tuyChon->id] ?? null;
+            if ($uuidTuyChon === null) {
+                throw new DomainException("Thiếu uuid do máy POS gửi cho tuỳ chọn (dòng gốc id {$tuyChon->id}).");
+            }
+
             $dongMoi->options()->create([
+                'uuid' => $uuidTuyChon,
                 'option_id' => $tuyChon->option_id,
                 'option_group_name' => $tuyChon->option_group_name,
                 'option_name' => $tuyChon->option_name,

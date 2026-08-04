@@ -151,6 +151,7 @@ Món hàng nào không rõ thuộc nhóm nào thì hỏi, đừng tự đoán.
 19. **Test phải phủ cả đường thất bại**, không chỉ đường thành công: bàn đã có khách, ca đã đóng, thu thiếu tiền, huỷ mà không ghi lý do.
 20. **Không viết comment giải thích cú pháp PHP.** Comment chỉ để giải thích *quyết định nghiệp vụ* và viết bằng tiếng Việt.
 21. **Chạy `./vendor/bin/pint` trước khi coi một việc là xong.**
+22. **Factory KHÔNG sinh giá trị ngẫu nhiên cho cột UNIQUE khi không gian giá trị đủ nhỏ để trùng trong một lần chạy test — mã bàn, mã món, số điện thoại, tên nhóm. Dùng bộ đếm tăng dần cho những cột đó. NGOẠI LỆ: cột uuid giữ `Str::uuid()`. Không gian giá trị của UUID lớn tới mức trùng nhau không phải rủi ro thực tế, và đổi sang bộ đếm sẽ phá định dạng UUID mà tầng sản xuất có kiểm tra — làm test bớt giống luồng thật. Test đỏ ngẫu nhiên nguy hiểm hơn không có test, vì nó dạy người đọc bỏ qua màu đỏ.**
 
 ---
 

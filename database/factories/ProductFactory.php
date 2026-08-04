@@ -16,11 +16,18 @@ class ProductFactory extends Factory
 {
     protected $model = Product::class;
 
+    /**
+     * Bộ đếm tăng dần, KHÔNG dùng số ngẫu nhiên — xem luật CLAUDE.md mục 22.
+     * Tiền tố `TEST` cố ý khác mọi mã món cố định trong seeder (TIGER, HEIN,
+     * SGN...) để không bao giờ đụng nhau.
+     */
+    private static int $sequence = 0;
+
     public function definition(): array
     {
         return [
             'category_id' => Category::factory(),
-            'code' => fake()->unique()->bothify('????##'),
+            'code' => 'TEST'.str_pad((string) ++self::$sequence, 6, '0', STR_PAD_LEFT),
             'name' => fake()->word(),
             'description' => fake()->optional()->sentence(),
             'station_override' => null,

@@ -80,8 +80,11 @@ it('H3: dòng đã huỷ không tính vào tạm tính của lượt khách', fu
 it('H4: huỷ 1 trong 5 — tách thành dòng còn 4 (giữ nguyên) và dòng huỷ 1, tổng số lượng bằng nhau', function () {
     $tongTruoc = $this->item->quantity;
 
-    $response = huyMon($this->owner, $this->order, $this->item, ['quantity' => 1, 'reason' => 'Khách trả bớt'])
-        ->assertOk();
+    $response = huyMon($this->owner, $this->order, $this->item, [
+        'quantity' => 1,
+        'reason' => 'Khách trả bớt',
+        'new_item_uuid' => (string) Str::uuid(),
+    ])->assertOk();
 
     $dongMoi = OrderItem::query()->findOrFail($response->json('data.id'));
     expect($dongMoi->id)->not->toBe($this->item->id)
@@ -102,6 +105,25 @@ it('H4: huỷ 1 trong 5 — tách thành dòng còn 4 (giữ nguyên) và dòng 
     expect($this->luot->refresh()->subtotal_amount)->toBe(100_000); // 4 x 25.000 còn lại
 });
 
+it('Phase 2 Bước 2: huỷ một phần mà thiếu uuid do máy POS gửi cho dòng mới thì bị chặn', function () {
+    huyMon($this->owner, $this->order, $this->item, ['quantity' => 1, 'reason' => 'Khách trả bớt'])
+        ->assertUnprocessable()
+        ->assertJsonPath('code', 'DOMAIN_ERROR');
+
+    expect(OrderItem::query()->where('order_id', $this->order->id)->count())->toBe(1);
+});
+
+it('Phase 2 Bước 2: gửi lại đúng new_item_uuid hai lần chỉ tách một lần, không trừ số lượng hai lần', function () {
+    $uuidDongMoi = (string) Str::uuid();
+    $payload = ['quantity' => 1, 'reason' => 'Khách trả bớt', 'new_item_uuid' => $uuidDongMoi];
+
+    huyMon($this->owner, $this->order, $this->item, $payload)->assertOk();
+    huyMon($this->owner, $this->order, $this->item, $payload)->assertSuccessful();
+
+    expect(OrderItem::query()->where('order_id', $this->order->id)->count())->toBe(2)
+        ->and($this->item->refresh()->quantity)->toBe(4);
+});
+
 it('Bước 2: tách dòng từ món ĐÃ served — dòng mới kế thừa served_at của dòng gốc', function () {
     $this->item->update(['status' => OrderItemStatus::Served, 'served_at' => now()->subMinutes(10)]);
     // Cột served_at là DATETIME (không có phần mili-giây) — đọc lại từ DB để so
@@ -113,6 +135,7 @@ it('Bước 2: tách dòng từ món ĐÃ served — dòng mới kế thừa ser
         'reason' => 'Khách trả bớt',
         'approver_user_id' => $this->thuNgan->id,
         'approver_pin' => '1234',
+        'new_item_uuid' => (string) Str::uuid(),
     ])->assertOk();
 
     $dongMoi = OrderItem::query()->findOrFail($response->json('data.id'));
@@ -126,8 +149,11 @@ it('Bước 2: tách dòng từ món CHƯA served — dòng mới cũng served_a
     expect($this->item->status)->toBe(OrderItemStatus::Ordered)
         ->and($this->item->served_at)->toBeNull();
 
-    $response = huyMon($this->owner, $this->order, $this->item, ['quantity' => 1, 'reason' => 'Khách trả bớt'])
-        ->assertOk();
+    $response = huyMon($this->owner, $this->order, $this->item, [
+        'quantity' => 1,
+        'reason' => 'Khách trả bớt',
+        'new_item_uuid' => (string) Str::uuid(),
+    ])->assertOk();
 
     $dongMoi = OrderItem::query()->findOrFail($response->json('data.id'));
     expect($dongMoi->served_at)->toBeNull();

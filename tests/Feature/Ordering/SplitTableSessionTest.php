@@ -16,11 +16,12 @@ use App\Domain\Staffing\Models\User;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 
-function tachBan(User $user, TableSession $luot, array $orderItemIds, array $diningTableIds, int $guestCount = 2): TestResponse
+function tachBan(User $user, TableSession $luot, array $orderItemIds, array $diningTableIds, int $guestCount = 2, ?string $uuid = null): TestResponse
 {
     return test()->postJson(
         "/api/v1/table-sessions/{$luot->id}/split",
         [
+            'uuid' => $uuid ?? (string) Str::uuid(),
             'order_item_ids' => $orderItemIds,
             'dining_table_ids' => $diningTableIds,
             'guest_count' => $guestCount,
@@ -157,6 +158,17 @@ it('không tách được dòng món đã huỷ', function () {
 
     tachBan($this->staff, $this->luot, [$dongDaHuy->id], [$this->banGhep->id])
         ->assertUnprocessable();
+});
+
+it('Phase 2 Bước 2: gửi lại đúng uuid lượt khách mới hai lần chỉ tách một lần, không tạo thêm lượt khách', function () {
+    $uuidLuotMoi = (string) Str::uuid();
+    $idChuyen = $this->dongMon->take(1)->pluck('id')->all();
+
+    $lan1 = tachBan($this->staff, $this->luot, $idChuyen, [$this->banGhep->id], uuid: $uuidLuotMoi)->assertCreated();
+    $lan2 = tachBan($this->staff, $this->luot, $idChuyen, [$this->banGhep->id], uuid: $uuidLuotMoi)->assertSuccessful();
+
+    expect($lan2->json('data.new.id'))->toBe($lan1->json('data.new.id'))
+        ->and(TableSession::query()->where('uuid', $uuidLuotMoi)->count())->toBe(1);
 });
 
 it('bếp không có quyền tách bàn', function () {

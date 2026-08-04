@@ -8,8 +8,10 @@ use App\Domain\Staffing\DTO\OpenShiftData;
 use App\Domain\Staffing\Enums\ShiftStatus;
 use App\Domain\Staffing\Models\Shift;
 use App\Exceptions\DomainException;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Spatie\Activitylog\Facades\Activity;
 
 /**
  * Mở một ca làm việc mới, ghi nhận tiền lẻ có sẵn trong két.
@@ -47,7 +49,13 @@ final class OpenShift
                 'opening_cash' => $data->openingCash->amount,
                 'status' => ShiftStatus::Open,
             ]);
-            $ca->update(['code' => $this->sinhMaCa($ca->id)]);
+            // Chỉ bỏ qua nhật ký cho việc gán MÃ HIỂN THỊ (chi tiết kỹ thuật —
+            // ghi tạm rồi sửa lại vì cần id thật trước), không phải một hành
+            // vi nghiệp vụ đáng ghi sổ. Nhật ký "tạo ca" ở create() phía trên
+            // vẫn ghi bình thường; đây chỉ tắt đúng dòng update() này.
+            Activity::withoutLogs(function () use ($ca) {
+                $ca->update(['code' => $this->sinhMaCa($ca->id, $ca->opened_at)]);
+            });
 
             return $ca;
         });
@@ -64,11 +72,16 @@ final class OpenShift
      * ngày" — chấp nhận đánh đổi này, giống hệt lý do ở
      * OpenTableSession::sinhMaLuotKhach(). Không cắt bớt nếu `id` vượt quá 2
      * chữ số — str_pad chỉ đệm thêm, không bao giờ cắt bớt.
+     *
+     * `$openedAt` PHẢI là thời điểm mở ca (`opened_at`), KHÔNG PHẢI `now()`
+     * lúc câu lệnh này chạy — lý do giống hệt `OpenTableSession::sinhMaLuotKhach()`:
+     * đồng bộ offline trễ qua nửa đêm sẽ gắn nhầm ca sang ngày hôm sau nếu
+     * dùng `now()`.
      */
-    private function sinhMaCa(int $id): string
+    private function sinhMaCa(int $id, Carbon $openedAt): string
     {
-        $homNay = now()->format('Ymd');
+        $ngay = $openedAt->format('Ymd');
 
-        return "CA-{$homNay}-".str_pad((string) $id, 2, '0', STR_PAD_LEFT);
+        return "CA-{$ngay}-".str_pad((string) $id, 2, '0', STR_PAD_LEFT);
     }
 }

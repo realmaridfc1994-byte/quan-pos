@@ -32,6 +32,10 @@ use Illuminate\Support\Facades\DB;
  * Việc chuyển dòng món thực sự nằm trong MoveOrderItem — Action này chỉ lo
  * phần tạo lượt mới + chuyển bàn, rồi gọi lại MoveOrderItem để khỏi lặp logic
  * gom món theo trạm bếp/quầy.
+ *
+ * `uuid` của lượt khách MỚI do máy POS sinh trước khi gửi (Phase 2 Bước 2,
+ * giống OpenTableSession) — tách bàn cũng là thao tác nhân viên bấm tại
+ * quầy, cần chống tách trùng khi mạng lag/bấm hai lần.
  */
 final class SplitTableSession
 {
@@ -53,6 +57,17 @@ final class SplitTableSession
         }
 
         return DB::transaction(function () use ($data): array {
+            // Bấm tách bàn hai lần vì mạng lag: trả lại đúng lượt khách mới đã
+            // tạo lần đầu, không tách thêm lần nữa — giống dedup theo uuid ở
+            // OpenTableSession.
+            $luotMoiDaCo = TableSession::query()->where('uuid', $data->uuid)->first();
+            if ($luotMoiDaCo !== null) {
+                return [
+                    'source' => TableSession::query()->findOrFail($data->sourceTableSessionId),
+                    'new' => $luotMoiDaCo,
+                ];
+            }
+
             // Luật CLAUDE.md mục 11: Shift → TableSession → (Bàn/Món).
             $shift = Shift::query()->where('status', ShiftStatus::Open)->lockForUpdate()->first();
 
@@ -103,6 +118,7 @@ final class SplitTableSession
             }
 
             $luotMoi = TableSession::query()->create([
+                'uuid' => $data->uuid,
                 'code' => $this->sinhMaLuotKhach(),
                 'shift_id' => $shift->id,
                 'guest_count' => $data->guestCount,

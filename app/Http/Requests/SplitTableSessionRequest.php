@@ -20,6 +20,7 @@ final class SplitTableSessionRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'uuid' => ['required', 'uuid'],
             'order_item_ids' => ['required', 'array', 'min:1'],
             'order_item_ids.*' => ['integer', 'distinct', 'exists:order_items,id'],
             'dining_table_ids' => ['required', 'array', 'min:1'],
@@ -32,6 +33,7 @@ final class SplitTableSessionRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'uuid.required' => 'Thiếu mã vân tay của lượt khách mới.',
             'order_item_ids.required' => 'Phải chọn ít nhất một dòng món để tách.',
             'order_item_ids.min' => 'Phải chọn ít nhất một dòng món để tách.',
             'order_item_ids.*.distinct' => 'Một dòng món không được chọn hai lần.',

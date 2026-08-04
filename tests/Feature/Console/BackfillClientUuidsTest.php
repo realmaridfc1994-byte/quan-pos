@@ -2,48 +2,17 @@
 
 declare(strict_types=1);
 
-use App\Domain\Ordering\Models\OrderItem;
-use App\Domain\Ordering\Models\OrderItemOption;
-use App\Domain\Ordering\Models\TableSession;
-use App\Domain\Staffing\Models\Shift;
-use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\DB;
-
-it('gán uuid cho dữ liệu cũ chưa có ở cả ba bảng, không đụng dòng đã có uuid', function () {
-    // TableSessionFactory tự tạo Shift riêng (mặc định "open") — hai lượt khách
-    // độc lập trong cùng test phải dùng chung một ca, nếu không đụng ràng buộc
-    // "chỉ một ca mở cùng lúc" (uq_shifts_only_one_open).
-    $ca = Shift::factory()->closed()->create();
-
-    $luotCu = TableSession::factory()->create(['shift_id' => $ca->id]);
-    $dongMonCu = OrderItem::factory()->create();
-    $tuyChonCu = OrderItemOption::factory()->for($dongMonCu, 'orderItem')->create();
-
-    // Factory đã mặc định sinh uuid — giả lập dữ liệu THẬT SỰ cũ bằng cách xoá uuid đi.
-    DB::table('table_sessions')->where('id', $luotCu->id)->update(['uuid' => null]);
-    DB::table('order_items')->where('id', $dongMonCu->id)->update(['uuid' => null]);
-    DB::table('order_item_options')->where('id', $tuyChonCu->id)->update(['uuid' => null]);
-
-    $luotDaCoUuid = TableSession::factory()->create(['shift_id' => $ca->id]);
-    $uuidDaCo = $luotDaCoUuid->uuid;
-
-    Artisan::call('pos:backfill-uuid');
-
-    expect($luotCu->refresh()->uuid)->not->toBeNull()
-        ->and($dongMonCu->refresh()->uuid)->not->toBeNull()
-        ->and($tuyChonCu->refresh()->uuid)->not->toBeNull();
-
-    // Dòng đã có uuid từ trước không bị đổi.
-    expect($luotDaCoUuid->refresh()->uuid)->toBe($uuidDaCo);
-});
-
-it('chạy lại lần hai không lỗi, không còn dòng nào thiếu uuid', function () {
-    TableSession::factory()->create();
-    DB::table('table_sessions')->update(['uuid' => null]);
-
-    Artisan::call('pos:backfill-uuid');
-    $maLan1 = Artisan::call('pos:backfill-uuid');
-
-    expect($maLan1)->toBe(0)
-        ->and(TableSession::query()->whereNull('uuid')->count())->toBe(0);
-});
+/**
+ * Lệnh `pos:backfill-uuid` (app/Console/Commands/BackfillClientUuids.php) đã
+ * dùng thật một lần để gán uuid cho dữ liệu cũ trước khi Phase 2 Bước 2 siết
+ * ba cột `uuid` (table_sessions, order_items, order_item_options) thành
+ * NOT NULL (migration 2026_08_04_000001_make_client_uuid_not_null).
+ *
+ * Hai test trước đây ở file này giả lập "dữ liệu cũ thiếu uuid" bằng cách tự
+ * `DB::table(...)->update(['uuid' => null])` — cách này không còn hợp lệ vì
+ * cột đã NOT NULL, chính câu UPDATE đó bị MySQL từ chối. Không còn cách nào
+ * tạo ra được một dòng uuid rỗng trong môi trường đã siết constraint, nên
+ * không còn kịch bản nào để kiểm thử lệnh này nữa — xoá hai test, GIỮ NGUYÊN
+ * lệnh `pos:backfill-uuid` (đã hoàn thành nhiệm vụ lịch sử, không cần chạy
+ * lại, không xoá code vì vẫn có thể cần tham khảo).
+ */

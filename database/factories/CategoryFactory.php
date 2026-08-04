@@ -15,10 +15,17 @@ class CategoryFactory extends Factory
 {
     protected $model = Category::class;
 
+    /**
+     * Bộ đếm tăng dần, KHÔNG dùng số ngẫu nhiên — xem luật CLAUDE.md mục 22.
+     * Tiền tố cố ý khác mọi tên nhóm món cố định trong seeder (Bia & nước,
+     * Đồ nhắm, Nướng, Lẩu, Hải sản...) để không bao giờ đụng nhau.
+     */
+    private static int $sequence = 0;
+
     public function definition(): array
     {
         return [
-            'name' => fake()->unique()->word(),
+            'name' => 'Nhóm test '.++self::$sequence,
             'station' => Station::Kitchen,
             'sort_order' => fake()->numberBetween(0, 100),
             'is_active' => true,

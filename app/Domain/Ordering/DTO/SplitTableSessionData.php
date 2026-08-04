@@ -18,6 +18,8 @@ final readonly class SplitTableSessionData
         public array $diningTableIds,
         public int $guestCount,
         public int $actorUserId,
+        /** Vân tay do máy POS sinh cho LƯỢT KHÁCH MỚI — chống tách trùng khi mạng lag/bấm hai lần */
+        public string $uuid,
     ) {}
 
     public static function fromRequest(FormRequest $request): self
@@ -28,6 +30,7 @@ final readonly class SplitTableSessionData
             diningTableIds: array_map('intval', $request->input('dining_table_ids', [])),
             guestCount: $request->integer('guest_count'),
             actorUserId: (int) $request->user()->id,
+            uuid: $request->string('uuid')->toString(),
         );
     }
 }

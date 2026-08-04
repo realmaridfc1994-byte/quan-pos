@@ -17,12 +17,14 @@ use App\Domain\Catalog\Models\Option;
 use App\Domain\Catalog\Models\OptionGroup;
 use App\Domain\Catalog\Models\Product;
 use App\Domain\Catalog\Models\ProductVariant;
+use App\Domain\Ordering\Enums\OrderStatus;
 use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\DiningTable;
 use App\Domain\Ordering\Models\Order;
 use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Ordering\Models\OrderItemOption;
 use App\Domain\Ordering\Models\TableSession;
+use App\Domain\Ordering\Models\TableSessionTable;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
 use Illuminate\Support\Str;
@@ -72,6 +74,33 @@ function thuTienCoverage(User $user, TableSession $luot, array $overrides = []):
             'method' => 'cash',
             'amount' => 500_000,
             'tendered_amount' => 500_000,
+        ], $overrides),
+        array_merge(authHeaderFor($user), ['Idempotency-Key' => (string) Str::uuid()])
+    );
+}
+
+function tachBanCoverage(User $user, TableSession $luot, array $orderItemIds, int $banId, array $overrides = []): TestResponse
+{
+    return test()->postJson(
+        "/api/v1/table-sessions/{$luot->id}/split",
+        array_merge([
+            'uuid' => (string) Str::uuid(),
+            'order_item_ids' => $orderItemIds,
+            'dining_table_ids' => [$banId],
+            'guest_count' => 2,
+        ], $overrides),
+        array_merge(authHeaderFor($user), ['Idempotency-Key' => (string) Str::uuid()])
+    );
+}
+
+function huyMotPhanCoverage(User $user, Order $order, OrderItem $item, array $overrides = []): TestResponse
+{
+    return test()->postJson(
+        "/api/v1/orders/{$order->id}/items/{$item->id}/cancel",
+        array_merge([
+            'quantity' => 1,
+            'reason' => 'Test quét endpoint',
+            'new_item_uuid' => (string) Str::uuid(),
         ], $overrides),
         array_merge(authHeaderFor($user), ['Idempotency-Key' => (string) Str::uuid()])
     );
@@ -189,4 +218,64 @@ it('thu tiền gửi hai lần cùng uuid chỉ tạo một phiếu thu', functi
     thuTienCoverage($thuNgan, $luot, ['uuid' => $uuid])->assertSuccessful();
 
     expect(Payment::query()->where('uuid', $uuid)->count())->toBe(1);
+});
+
+// ── table_sessions (tách bàn) ───────────────────────────────────────────
+
+it('tách bàn thiếu uuid của lượt khách mới thì bị chặn 422', function () {
+    $ca = Shift::factory()->open()->create();
+    $staff = User::factory()->staff()->create();
+    $banChinh = DiningTable::factory()->create();
+    $banGhep = DiningTable::factory()->create();
+    $luot = TableSession::factory()->create(['shift_id' => $ca->id, 'status' => TableSessionStatus::Open]);
+    TableSessionTable::factory()->for($luot)->create(['dining_table_id' => $banChinh->id, 'is_primary' => true, 'attached_by_user_id' => $staff->id]);
+    TableSessionTable::factory()->for($luot)->notPrimary()->create(['dining_table_id' => $banGhep->id, 'attached_by_user_id' => $staff->id]);
+    $order = Order::factory()->for($luot, 'tableSession')->create(['status' => OrderStatus::Sent]);
+    $item = OrderItem::factory()->for($order)->create();
+
+    tachBanCoverage($staff, $luot, [$item->id], $banGhep->id, ['uuid' => null])->assertUnprocessable();
+});
+
+it('tách bàn gửi hai lần cùng uuid chỉ tạo một lượt khách mới', function () {
+    $ca = Shift::factory()->open()->create();
+    $staff = User::factory()->staff()->create();
+    $banChinh = DiningTable::factory()->create();
+    $banGhep = DiningTable::factory()->create();
+    $luot = TableSession::factory()->create(['shift_id' => $ca->id, 'status' => TableSessionStatus::Open]);
+    TableSessionTable::factory()->for($luot)->create(['dining_table_id' => $banChinh->id, 'is_primary' => true, 'attached_by_user_id' => $staff->id]);
+    TableSessionTable::factory()->for($luot)->notPrimary()->create(['dining_table_id' => $banGhep->id, 'attached_by_user_id' => $staff->id]);
+    $order = Order::factory()->for($luot, 'tableSession')->create(['status' => OrderStatus::Sent]);
+    $item = OrderItem::factory()->for($order)->create();
+
+    $uuid = (string) Str::uuid();
+    tachBanCoverage($staff, $luot, [$item->id], $banGhep->id, ['uuid' => $uuid])->assertCreated();
+    tachBanCoverage($staff, $luot, [$item->id], $banGhep->id, ['uuid' => $uuid])->assertSuccessful();
+
+    expect(TableSession::query()->where('uuid', $uuid)->count())->toBe(1);
+});
+
+// ── order_items / order_item_options (huỷ một phần) ─────────────────────
+
+it('huỷ một phần thiếu uuid của dòng món mới thì bị chặn 422', function () {
+    $ca = Shift::factory()->open()->create();
+    $owner = User::factory()->owner()->create();
+    $luot = TableSession::factory()->withTable()->create(['shift_id' => $ca->id, 'status' => TableSessionStatus::Open]);
+    $order = Order::factory()->for($luot, 'tableSession')->create(['status' => OrderStatus::Sent]);
+    $item = OrderItem::factory()->for($order)->create(['quantity' => 5]);
+
+    huyMotPhanCoverage($owner, $order, $item, ['new_item_uuid' => null])->assertUnprocessable();
+});
+
+it('huỷ một phần gửi hai lần cùng uuid chỉ tách một lần', function () {
+    $ca = Shift::factory()->open()->create();
+    $owner = User::factory()->owner()->create();
+    $luot = TableSession::factory()->withTable()->create(['shift_id' => $ca->id, 'status' => TableSessionStatus::Open]);
+    $order = Order::factory()->for($luot, 'tableSession')->create(['status' => OrderStatus::Sent]);
+    $item = OrderItem::factory()->for($order)->create(['quantity' => 5]);
+
+    $uuid = (string) Str::uuid();
+    huyMotPhanCoverage($owner, $order, $item, ['new_item_uuid' => $uuid])->assertOk();
+    huyMotPhanCoverage($owner, $order, $item, ['new_item_uuid' => $uuid])->assertSuccessful();
+
+    expect(OrderItem::query()->where('uuid', $uuid)->count())->toBe(1);
 });

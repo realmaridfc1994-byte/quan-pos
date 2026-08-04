@@ -10,6 +10,7 @@ use App\Domain\Staffing\Models\User;
 use App\Support\Money;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
+use Spatie\Activitylog\Models\Activity;
 
 function moCa(User $user, array $payload = []): TestResponse
 {
@@ -35,6 +36,21 @@ it('thu ngân mở ca thành công, mã ca đúng định dạng CA-yyyymmdd-NN'
     expect($ca->code)->toStartWith('CA-'.now()->format('Ymd').'-')
         ->and($ca->opened_by_user_id)->toBe($thuNgan->id)
         ->and($ca->status)->toBe(ShiftStatus::Open);
+});
+
+it('mở một ca chỉ ghi đúng 1 bản ghi activity log (tạo ca), không có bản ghi đổi code', function () {
+    $thuNgan = User::factory()->cashier()->create();
+
+    moCa($thuNgan)->assertCreated();
+    $ca = Shift::query()->sole();
+
+    $banGhi = Activity::query()
+        ->where('subject_type', Shift::class)
+        ->where('subject_id', $ca->id)
+        ->get();
+
+    expect($banGhi)->toHaveCount(1)
+        ->and($banGhi->first()->event)->toBe('created');
 });
 
 it('Bước 2: mở 3 ca liên tiếp (đóng cái trước rồi mở cái sau) — mã đúng định dạng CA-{Ymd}-{số}, không trùng nhau', function () {

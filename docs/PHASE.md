@@ -40,9 +40,9 @@ BUOC_DANG_MO = 2
 
 - [x] Phase 0 — 9 bước, 5 lỗi 🔴 đóng sau 2 vòng review
 - [x] Phase 1 — 11 bước, 2 lỗi 🔴 đóng sau vòng review cuối
-- [ ] Bước 0 — Kiểm toán định danh  ← ĐANG MỞ
-- [ ] Bước 1 — Tách bàn
-- [ ] Bước 2 — Định danh client sinh
+- [x] Bước 0 — Kiểm toán định danh  ← ĐANG MỞ
+- [x] Bước 1 — Tách bàn
+- [x] Bước 2 — Định danh client sinh
 - [ ] Bước 3 — Kho dữ liệu trên máy POS
 - [ ] Bước 4 — Đồng bộ hàng loạt
 - [ ] Bước 5 — Màn hình xử lý xung đột

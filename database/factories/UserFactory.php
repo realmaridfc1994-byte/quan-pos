@@ -20,14 +20,22 @@ class UserFactory extends Factory
     protected static ?string $password;
 
     /**
+     * Bộ đếm tăng dần, KHÔNG dùng số ngẫu nhiên — xem luật CLAUDE.md mục 22.
+     * Tiền tố cố ý khác mọi username/phone cố định trong seeder và test
+     * đăng nhập (owner/cashier/staff/kitchen, 09000000xx, 0912345678,
+     * 0999999999...) để không bao giờ đụng nhau.
+     */
+    private static int $sequence = 0;
+
+    /**
      * @return array<string, mixed>
      */
     public function definition(): array
     {
         return [
             'name' => fake()->name(),
-            'username' => fake()->unique()->userName(),
-            'phone' => fake()->unique()->numerify('09########'),
+            'username' => 'user'.str_pad((string) ++self::$sequence, 6, '0', STR_PAD_LEFT),
+            'phone' => '07'.str_pad((string) ++self::$sequence, 8, '0', STR_PAD_LEFT),
             'password' => static::$password ??= Hash::make('password'),
             'pin_code' => null,
             'role' => UserRole::Staff,

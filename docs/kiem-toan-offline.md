@@ -24,6 +24,8 @@
 
 **Tóm tắt:** trong 4 nhóm định danh có ý nghĩa nghiệp vụ (không tính `id` tự tăng), chỉ `orders.uuid` và `payments.uuid` là do máy POS sinh trước. `table_sessions.code`, `shifts.code`, `orders.sequence_no` đều do server tự đếm bằng một câu truy vấn `COUNT()`/`MAX()` tại thời điểm ghi — máy POS không có sẵn cách tự sinh các số này khi mất mạng.
 
+**Ghi chú hiện trạng (không đề xuất sửa):** `sinhMaLuotKhach()` (`OpenTableSession.php:99-105`) và `sinhMaCa()` (`OpenShift.php:40-46`) đều lấy ngày từ `now()` tại thời điểm câu lệnh chạy, không phải từ `opened_at` của chính bản ghi đang tạo. Với luồng offline dự kiến ở Bước 3-4 (ghi cục bộ trên máy POS rồi đồng bộ lên server sau), nếu một lượt khách/ca được mở lúc 23:50 nhưng dữ liệu chỉ tới server và được ghi lúc 00:10 hôm sau, mã sinh ra sẽ mang ngày ghi (hôm sau) trong khi bản chất nghiệp vụ (doanh thu đêm đó) thuộc ngày hôm trước — gây lệch khi đối chiếu sổ sách theo ngày. Rủi ro này chỉ phát sinh khi có độ trễ giữa `opened_at` và thời điểm câu lệnh `sinhMaLuotKhach()`/`sinhMaCa()` thực sự chạy trên server; ở luồng hiện tại (Phase 1, ghi trực tiếp, không offline) hai thời điểm này luôn trùng nhau nên chưa quan sát thấy sai lệch.
+
 ---
 
 ## 2. THỨ TỰ KHOÁ
