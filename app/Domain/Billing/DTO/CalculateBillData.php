@@ -9,6 +9,15 @@ use Illuminate\Foundation\Http\FormRequest;
 
 final readonly class CalculateBillData
 {
+    /**
+     * @param  bool  $skipApprovalThreshold  Bỏ qua hoàn toàn bước hỏi PIN vượt
+     *                                       ngưỡng vai trò (TableSessionPolicy::discount()).
+     *                                       CHỈ dùng cho App\Domain\Billing\Actions\ApplyPromotion
+     *                                       (Phase 2 Bước 6) — khuyến mãi đã được chủ quán duyệt
+     *                                       ngay lúc tạo chương trình, không cần duyệt lại từng lần
+     *                                       áp dụng. Mọi lời gọi khác (giảm giá tay của thu ngân/
+     *                                       chủ quán qua API) PHẢI để mặc định false.
+     */
     public function __construct(
         public int $tableSessionId,
         public Money $discountAmount,
@@ -16,6 +25,7 @@ final readonly class CalculateBillData
         public int $requestedByUserId,
         public ?int $approverUserId,
         public ?string $approverPin,
+        public bool $skipApprovalThreshold = false,
     ) {}
 
     public static function fromRequest(FormRequest $request): self

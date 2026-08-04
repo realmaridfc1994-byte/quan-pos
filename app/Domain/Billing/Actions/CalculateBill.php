@@ -35,6 +35,12 @@ use Illuminate\Support\Facades\DB;
  * Giảm giá làm tổng phải thu bằng đúng số đã trả thì tự đóng lượt khách luôn
  * (giống RecordPayment khi thu đủ) — không có lý do gì bắt thu ngân bấm thêm
  * một bước đóng bàn riêng khi tiền đã đủ ngay tại lúc giảm giá.
+ *
+ * `$data->skipApprovalThreshold` (Phase 2 Bước 6): bỏ hẳn bước hỏi PIN vượt
+ * ngưỡng — CHỈ App\Domain\Billing\Actions\ApplyPromotion được bật cờ này,
+ * vì khuyến mãi đã được chủ quán duyệt ngay lúc tạo chương trình, không cần
+ * duyệt lại mỗi lần áp. Luật "tổng không được xuống dưới đã trả" (T3) vẫn
+ * luôn được kiểm dù có cờ này hay không.
  */
 final class CalculateBill
 {
@@ -67,23 +73,25 @@ final class CalculateBill
                 throw new DomainException('Giảm giá phải ghi rõ lý do.');
             }
 
-            $nguoiYeuCau = User::query()->findOrFail($data->requestedByUserId);
-            $phanTram = $this->phanTramLamTron($data->discountAmount, $tamTinh);
-            $chinhSachGiam = new TableSessionPolicy;
+            if (! $data->skipApprovalThreshold) {
+                $nguoiYeuCau = User::query()->findOrFail($data->requestedByUserId);
+                $phanTram = $this->phanTramLamTron($data->discountAmount, $tamTinh);
+                $chinhSachGiam = new TableSessionPolicy;
 
-            if (! $chinhSachGiam->discount($nguoiYeuCau, $tableSession, $phanTram)) {
-                if ($data->approverUserId === null || $data->approverPin === null) {
-                    throw new DomainException('Giảm giá vượt mức cho phép, phải có người duyệt bằng mã PIN.');
-                }
+                if (! $chinhSachGiam->discount($nguoiYeuCau, $tableSession, $phanTram)) {
+                    if ($data->approverUserId === null || $data->approverPin === null) {
+                        throw new DomainException('Giảm giá vượt mức cho phép, phải có người duyệt bằng mã PIN.');
+                    }
 
-                $nguoiDuyet = $this->verifyApproverPin->handle(new PinVerifyData(
-                    userId: $data->approverUserId,
-                    pin: $data->approverPin,
-                    requestedByUserId: $data->requestedByUserId,
-                ));
+                    $nguoiDuyet = $this->verifyApproverPin->handle(new PinVerifyData(
+                        userId: $data->approverUserId,
+                        pin: $data->approverPin,
+                        requestedByUserId: $data->requestedByUserId,
+                    ));
 
-                if (! $chinhSachGiam->discount($nguoiDuyet, $tableSession, $phanTram)) {
-                    throw new DomainException('Người duyệt cũng không đủ thẩm quyền giảm giá ở mức này.');
+                    if (! $chinhSachGiam->discount($nguoiDuyet, $tableSession, $phanTram)) {
+                        throw new DomainException('Người duyệt cũng không đủ thẩm quyền giảm giá ở mức này.');
+                    }
                 }
             }
 

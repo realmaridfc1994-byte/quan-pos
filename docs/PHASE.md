@@ -5,7 +5,7 @@
 
 ```
 PHASE = 2
-BUOC_DANG_MO = 2
+BUOC_DANG_MO = 8
 ```
 
 **Phase 2 — Chuẩn hoá vận hành. Bước 0 — Kiểm toán định danh.**
@@ -43,10 +43,10 @@ BUOC_DANG_MO = 2
 - [x] Bước 0 — Kiểm toán định danh  ← ĐANG MỞ
 - [x] Bước 1 — Tách bàn
 - [x] Bước 2 — Định danh client sinh
-- [ ] Bước 3 — Kho dữ liệu trên máy POS
-- [ ] Bước 4 — Đồng bộ hàng loạt
-- [ ] Bước 5 — Màn hình xử lý xung đột
-- [ ] Bước 6 — Khuyến mãi
-- [ ] Bước 7 — Thanh toán QR
-- [ ] Bước 8 — Báo cáo tổng hợp
+- [x] Bước 3 — Kho dữ liệu trên máy POS
+- [x] Bước 4 — Đồng bộ hàng loạt
+- [x] Bước 5 — Màn hình xử lý xung đột
+- [x] Bước 6 — Khuyến mãi
+- [x] Bước 7 — Thanh toán QR
+- [x] Bước 8 — Báo cáo tổng hợp
 - [ ] Bước 9 — Opus review

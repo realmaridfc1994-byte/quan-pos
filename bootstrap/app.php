@@ -4,6 +4,7 @@ use App\Exceptions\DomainException;
 use App\Exceptions\IdempotencyConflictException;
 use App\Exceptions\IdempotencyKeyRequiredException;
 use App\Exceptions\IdempotencyPayloadMismatchException;
+use App\Exceptions\SyncBatchLockedException;
 use App\Http\Middleware\EnsureIdempotencyKey;
 use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -46,6 +47,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 $e instanceof AuthenticationException => [401, 'UNAUTHENTICATED', 'Chưa đăng nhập hoặc phiên đã hết hạn.', null],
                 $e instanceof AuthorizationException => [403, 'FORBIDDEN', 'Bạn không có quyền thực hiện thao tác này.', null],
                 $e instanceof ThrottleRequestsException => [429, 'TOO_MANY_ATTEMPTS', 'Thử sai quá nhiều lần. Vui lòng đợi ít phút rồi thử lại.', null],
+                $e instanceof SyncBatchLockedException => [429, 'SYNC_BATCH_LOCKED', $e->getMessage(), null],
                 $e instanceof ModelNotFoundException, $e instanceof NotFoundHttpException => [404, 'NOT_FOUND', 'Không tìm thấy dữ liệu.', null],
                 app()->environment('production') => [500, 'SERVER_ERROR', 'Có lỗi xảy ra ở máy chủ. Vui lòng thử lại.', null],
                 default => null,

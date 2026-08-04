@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Domain\Billing\Actions\ApplyPromotion;
 use App\Domain\Billing\Actions\RecordPayment;
+use App\Domain\Billing\DTO\ApplyPromotionData;
 use App\Domain\Billing\DTO\RecordPaymentData;
 use App\Domain\Billing\Enums\PaymentMethod;
+use App\Domain\Billing\Models\Promotion;
 use App\Domain\Catalog\Enums\Station;
 use App\Domain\Catalog\Models\Category;
 use App\Domain\Catalog\Models\Product;
@@ -36,8 +39,15 @@ use App\Domain\Staffing\DTO\OpenShiftData;
 use App\Domain\Staffing\Enums\UserRole;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
+use App\Domain\Sync\Actions\SyncBatch;
+use App\Domain\Sync\DTO\SyncBatchData;
+use App\Domain\Sync\DTO\SyncOperationData;
+use App\Domain\Sync\Enums\OperationType;
+use App\Exceptions\DomainException;
 use App\Support\CashVariance;
 use App\Support\Money;
+use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -55,7 +65,7 @@ use Symfony\Component\Console\Command\Command as CommandAlias;
  */
 final class PosDemo extends Command
 {
-    protected $signature = 'pos:demo {--den=dong-ca : Mốc dừng lại — "ca", "ban", "goi-mon", "gui-bep", "tach-ban", "huy-mon", "thu-tien" hoặc "dong-ca" (mặc định — chạy trọn vẹn)}';
+    protected $signature = 'pos:demo {--den=dong-ca : Mốc dừng lại — "ca", "ban", "goi-mon", "gui-bep", "tach-ban", "huy-mon", "thu-tien", "khuyen-mai", "sync" hoặc "dong-ca" (mặc định — chạy trọn vẹn)}';
 
     protected $description = 'Diễn tập một ca bán hàng mẫu, dùng để tự kiểm tra bằng mắt (chỉ chạy ở môi trường local)';
 
@@ -72,6 +82,8 @@ final class PosDemo extends Command
         CancelOrderItem $huyMon,
         RecordPayment $thuTien,
         CloseShift $dongCa,
+        SyncBatch $dongBo,
+        ApplyPromotion $apDungKhuyenMai,
     ): int {
         if (! app()->environment('local')) {
             $this->line('<fg=red>❌ Lệnh này chỉ chạy ở môi trường local, môi trường hiện tại là "'.app()->environment().'".</>');
@@ -80,7 +92,7 @@ final class PosDemo extends Command
         }
 
         $den = $this->option('den');
-        $cacMoc = ['ca', 'ban', 'goi-mon', 'gui-bep', 'tach-ban', 'huy-mon', 'thu-tien', 'dong-ca'];
+        $cacMoc = ['ca', 'ban', 'goi-mon', 'gui-bep', 'tach-ban', 'huy-mon', 'thu-tien', 'khuyen-mai', 'sync', 'dong-ca'];
 
         if (! in_array($den, $cacMoc, true)) {
             $this->line("<fg=red>❌ Chưa hỗ trợ --den={$den}. Bước này chỉ hỗ trợ --den=".implode(', --den=', $cacMoc).'.</>');
@@ -94,6 +106,30 @@ final class PosDemo extends Command
 
         try {
             [$thuNgan, $ca] = $this->dienTapMoCa($moCa);
+
+            if ($den === 'sync') {
+                $this->dienTapDongBo($dongBo, $thuNgan);
+
+                $this->newLine();
+                $this->line('<fg=green;options=bold>✅ ĐỒNG BỘ CHẠY ĐÚNG</>');
+                $this->line('<fg=yellow>Đã dọn sạch toàn bộ dữ liệu diễn tập (rollback, không có gì được ghi thật vào database).</>');
+
+                DB::rollBack();
+
+                return CommandAlias::SUCCESS;
+            }
+
+            if ($den === 'khuyen-mai') {
+                $this->dienTapKhuyenMai($moBan, $goiMon, $apDungKhuyenMai, $thuNgan);
+
+                $this->newLine();
+                $this->line('<fg=green;options=bold>✅ KHUYẾN MÃI CHẠY ĐÚNG</>');
+                $this->line('<fg=yellow>Đã dọn sạch toàn bộ dữ liệu diễn tập (rollback, không có gì được ghi thật vào database).</>');
+
+                DB::rollBack();
+
+                return CommandAlias::SUCCESS;
+            }
 
             if (in_array($den, ['ban', 'goi-mon', 'gui-bep', 'tach-ban', 'huy-mon', 'thu-tien', 'dong-ca'], true)) {
                 $luotKhach = $this->dienTapMoBan($moBan);
@@ -297,6 +333,7 @@ final class PosDemo extends Command
             diningTableIds: [$banGhep->id],
             guestCount: 2,
             actorUserId: $thuNgan->id,
+            uuid: (string) Str::uuid(),
         ));
 
         $tamTinhCu = Money::fromInt($ketQua['source']->subtotal_amount);
@@ -333,6 +370,8 @@ final class PosDemo extends Command
             cancelledByUserId: $thuNgan->id,
             approverUserId: $thuNgan->id,
             approverPin: '1234',
+            newItemUuid: (string) Str::uuid(),
+            optionUuids: [],
         ));
 
         $dongMonGoc = $dongMon->refresh();
@@ -405,5 +444,186 @@ final class PosDemo extends Command
         $this->line("   Đếm thực tế trong két: {$demDuoc->format()}");
         $this->line("   Chênh lệch: {$chenhLech->format()}");
         $this->line("   Trạng thái ca: {$caDaDong->status->value}");
+    }
+
+    /**
+     * Diễn lại MỘT LẦN MẤT MẠNG RỒI CÓ MẠNG LẠI (Phase 2 Bước 4):
+     * máy 1 mở bàn lúc offline rồi gửi lên khi có mạng — áp dụng được ngay;
+     * gửi lại đúng gói đó lần nữa (mạng lag) — không tạo trùng;
+     * máy 2 cũng offline, cùng lúc mở đúng bàn đó cho nhóm khách khác — va
+     * chạm dòng 2 của ma trận, chờ chủ quán quyết ở màn hình Bước 5.
+     */
+    private function dienTapDongBo(SyncBatch $dongBo, User $thuNgan): void
+    {
+        $this->mocHienTai = 'ĐỒNG BỘ (mất mạng rồi có mạng lại)';
+        $this->newLine();
+        $this->line('<fg=cyan;options=bold>ĐỒNG BỘ — DIỄN LẠI MỘT LẦN MẤT MẠNG RỒI CÓ MẠNG LẠI</>');
+
+        $ban = DiningTable::factory()->create(['code' => 'DEMO-SYNC', 'name' => 'Bàn diễn tập đồng bộ']);
+
+        $luot1 = (string) Str::uuid();
+        $goi1 = new SyncBatchData(
+            batchUuid: (string) Str::uuid(),
+            deviceId: 'pos-01',
+            clientTime: CarbonImmutable::now(),
+            operations: [
+                new SyncOperationData(
+                    opUuid: (string) Str::uuid(),
+                    type: OperationType::OpenSession,
+                    occurredAt: CarbonImmutable::now()->subMinutes(10),
+                    dependsOn: [],
+                    payload: ['uuid' => $luot1, 'dining_table_ids' => [$ban->id], 'primary_dining_table_id' => $ban->id, 'guest_count' => 4],
+                    viTriGoc: 0,
+                ),
+            ],
+            receivedByUserId: $thuNgan->id,
+        );
+
+        $this->inKetQuaDongBo('Máy 1 — mất mạng lúc 19h50, có mạng lại, gửi mở bàn lên', $dongBo->handle($goi1));
+        $this->inKetQuaDongBo('Máy 1 — mạng lag, gửi lại ĐÚNG gói cũ (kiểm tra không tạo trùng)', $dongBo->handle($goi1));
+
+        $luot2 = (string) Str::uuid();
+        $goi2 = new SyncBatchData(
+            batchUuid: (string) Str::uuid(),
+            deviceId: 'pos-02',
+            clientTime: CarbonImmutable::now(),
+            operations: [
+                new SyncOperationData(
+                    opUuid: (string) Str::uuid(),
+                    type: OperationType::OpenSession,
+                    occurredAt: CarbonImmutable::now()->subMinutes(8),
+                    dependsOn: [],
+                    payload: ['uuid' => $luot2, 'dining_table_ids' => [$ban->id], 'primary_dining_table_id' => $ban->id, 'guest_count' => 2],
+                    viTriGoc: 0,
+                ),
+            ],
+            receivedByUserId: $thuNgan->id,
+        );
+
+        $this->inKetQuaDongBo('Máy 2 — cũng mất mạng, cùng lúc mở ĐÚNG bàn đó cho nhóm khách khác (va chạm)', $dongBo->handle($goi2));
+    }
+
+    /** @param list<array<string, mixed>> $ketQua */
+    private function inKetQuaDongBo(string $tieuDe, array $ketQua): void
+    {
+        $this->line("   {$tieuDe}:");
+        foreach ($ketQua as $kq) {
+            $them = isset($kq['conflict_id']) ? " — CHỜ CHỦ QUÁN QUYẾT (mã xung đột #{$kq['conflict_id']})" : '';
+            $this->line("     • {$kq['op_uuid']}: {$kq['status']}{$them}");
+        }
+    }
+
+    /**
+     * Diễn lại khuyến mãi (Phase 2 Bước 6):
+     *  - Giờ vàng ĐÚNG khung giờ hiện tại → áp được.
+     *  - Chồng khuyến mãi thứ hai lên cùng lượt khách → bị chặn.
+     *  - Giờ vàng SAI khung giờ, khuyến mãi ĐÃ HẾT HẠN, khuyến mãi ĐÃ HẾT LƯỢT
+     *    dùng → cả ba đều bị chặn.
+     *
+     * Khung giờ của khuyến mãi giờ vàng lấy quanh GIỜ THẬT lúc chạy lệnh này
+     * (now() ± 1 giờ / lệch hẳn +5 giờ) thay vì cố định "17:00-19:00" — để
+     * lệnh chạy đúng bất kể chạy vào giờ nào trong ngày, không phụ thuộc đồng
+     * hồ máy dev đang là mấy giờ.
+     */
+    private function dienTapKhuyenMai(OpenTableSession $moBan, PlaceOrder $goiMon, ApplyPromotion $apDungKhuyenMai, User $thuNgan): void
+    {
+        $this->mocHienTai = 'KHUYẾN MÃI';
+        $this->newLine();
+        $this->line('<fg=cyan;options=bold>KHUYẾN MÃI</>');
+
+        $nhomBia = Category::factory()->create(['name' => 'Bia diễn tập khuyến mãi', 'station' => Station::Bar]);
+        $bia = Product::factory()->for($nhomBia)->create(['code' => 'DEMO-KM-BIA', 'name' => 'Bia diễn tập khuyến mãi']);
+        $bienTheBia = ProductVariant::factory()->for($bia)->create(['name' => 'Lon', 'price' => 25_000]);
+
+        // ── Lượt khách 1: giờ vàng ĐANG áp dụng ngay lúc này ─────────────
+        $luot1 = $this->dienTapMoBanRieng($moBan, 'DEMO-KM-1');
+        $goiMon->handle(new PlaceOrderData(
+            uuid: (string) Str::uuid(),
+            tableSessionId: $luot1->id,
+            items: [new PlaceOrderItemData((string) Str::uuid(), $bia->id, $bienTheBia->id, 4, null, [])],
+            note: null,
+            createdByUserId: $thuNgan->id,
+        ));
+        $luot1->refresh();
+        $this->line('   Lượt 1 gọi 4 lon bia — tạm tính '.Money::fromInt($luot1->subtotal_amount)->format());
+
+        $gioVang = Promotion::factory()
+            ->happyHour(20, ['from' => now()->subHour()->format('H:i'), 'to' => now()->addHour()->format('H:i')])
+            ->choDanhMuc($nhomBia->id)
+            ->create(['code' => 'DEMO-GIOVANG', 'name' => 'Giờ vàng bia diễn tập']);
+
+        $luot1 = $apDungKhuyenMai->handle(new ApplyPromotionData($luot1->id, $gioVang->code, $thuNgan->id));
+        $this->line("   Áp \"{$gioVang->name}\" đúng giờ — giảm ".Money::fromInt($luot1->discount_amount)->format().', tổng còn '.Money::fromInt($luot1->total_amount)->format());
+
+        $this->kyVongBiChan(
+            fn () => $apDungKhuyenMai->handle(new ApplyPromotionData($luot1->id, $gioVang->code, $thuNgan->id)),
+            'Áp khuyến mãi THỨ HAI vào lượt khách vừa áp xong'
+        );
+
+        // ── Lượt khách 2: sai giờ, hết hạn, hết lượt ─────────────────────
+        $luot2 = $this->dienTapMoBanRieng($moBan, 'DEMO-KM-2');
+        $goiMon->handle(new PlaceOrderData(
+            uuid: (string) Str::uuid(),
+            tableSessionId: $luot2->id,
+            items: [new PlaceOrderItemData((string) Str::uuid(), $bia->id, $bienTheBia->id, 2, null, [])],
+            note: null,
+            createdByUserId: $thuNgan->id,
+        ));
+        $this->line('   Lượt 2 gọi 2 lon bia');
+
+        $saiGio = Promotion::factory()
+            ->happyHour(20, ['from' => now()->addHours(5)->format('H:i'), 'to' => now()->addHours(6)->format('H:i')])
+            ->create(['code' => 'DEMO-SAIGIO', 'name' => 'Giờ vàng sai giờ diễn tập']);
+        $this->kyVongBiChan(
+            fn () => $apDungKhuyenMai->handle(new ApplyPromotionData($luot2->id, $saiGio->code, $thuNgan->id)),
+            'Áp giờ vàng NGOÀI khung giờ'
+        );
+
+        $hetHan = Promotion::factory()->percent(10)->create([
+            'code' => 'DEMO-HETHAN', 'name' => 'Khuyến mãi hết hạn diễn tập', 'ends_at' => now()->subDay(),
+        ]);
+        $this->kyVongBiChan(
+            fn () => $apDungKhuyenMai->handle(new ApplyPromotionData($luot2->id, $hetHan->code, $thuNgan->id)),
+            'Áp khuyến mãi ĐÃ HẾT HẠN'
+        );
+
+        $hetLuot = Promotion::factory()->percent(10)->create([
+            'code' => 'DEMO-HETLUOT', 'name' => 'Khuyến mãi hết lượt diễn tập', 'max_usage' => 1, 'used_count' => 1,
+        ]);
+        $this->kyVongBiChan(
+            fn () => $apDungKhuyenMai->handle(new ApplyPromotionData($luot2->id, $hetLuot->code, $thuNgan->id)),
+            'Áp khuyến mãi ĐÃ HẾT LƯỢT DÙNG'
+        );
+    }
+
+    private function dienTapMoBanRieng(OpenTableSession $moBan, string $maBan): TableSession
+    {
+        $ban = DiningTable::factory()->create(['code' => $maBan, 'name' => "Bàn diễn tập {$maBan}"]);
+        $phucVu = User::factory()->create([
+            'name' => "Phục vụ diễn tập {$maBan}",
+            'role' => UserRole::Staff,
+            'password' => Hash::make('password'),
+            'is_active' => true,
+        ]);
+
+        return $moBan->handle(new OpenTableSessionData(
+            uuid: (string) Str::uuid(),
+            diningTableIds: [$ban->id],
+            primaryDiningTableId: $ban->id,
+            guestCount: 2,
+            openedByUserId: $phucVu->id,
+        ));
+    }
+
+    /** Chạy $viec, kỳ vọng bị DomainException chặn — báo lỗi diễn tập nếu KHÔNG bị chặn. */
+    private function kyVongBiChan(Closure $viec, string $moTa): void
+    {
+        try {
+            $viec();
+
+            throw new \RuntimeException("LỖI DIỄN TẬP: \"{$moTa}\" đáng lẽ phải bị chặn nhưng lại thành công.");
+        } catch (DomainException $e) {
+            $this->line("   {$moTa} — ĐÚNG LUẬT, BỊ CHẶN: {$e->getMessage()}");
+        }
     }
 }

@@ -1,15 +1,23 @@
 import './bootstrap';
+import QRCode from 'qrcode';
 import api, { batBuocDangNhap, layNguoiDung, layThongBaoLoi, taoUuid, xoaDangNhap } from './lib/api';
+import db, { layMaThietBi } from './lib/db';
+import { dongBoThucDonNeuCoMang, docThucDonTuKho } from './lib/menuSync';
+import { HangCho } from './lib/queue';
+import { capNhatChiBaoMang, duocPhepKhiMatMang, theoDoiTrangThaiMang } from './lib/offline';
 
 if (!batBuocDangNhap()) {
     throw new Error('Chưa đăng nhập.');
 }
 
+const hangCho = new HangCho(db.queue);
+let maThietBi = null; // gán ở khoiDong() — mã thiết bị riêng của máy POS này, xem lib/db.js
+
 const state = {
     nguoiDung: layNguoiDung(),
     ban: [], // danh sách bàn từ floor-plan
     thongTinLuot: {}, // cache theo session id: {status, subtotal_amount_text, total_amount_text, ...}
-    luotHienTai: null, // TableSessionResource đầy đủ đang mở trên màn gọi món
+    luotHienTai: null, // TableSessionResource đầy đủ đang mở trên màn gọi món (key = String(id) hoặc uuid nếu mở lúc offline)
     menu: [], // danh mục + món
     nhomDangChon: null,
     gio: [], // giỏ món chưa gửi
@@ -61,21 +69,36 @@ async function taiSoDoBan() {
     const luoi = document.getElementById('luoi-ban');
     luoi.innerHTML = '<p class="col-span-full text-lg text-neutral-500">Đang tải sơ đồ bàn...</p>';
 
-    const { data } = await api.get('/floor-plan');
-    state.ban = data.data;
+    if (navigator.onLine) {
+        try {
+            const { data } = await api.get('/floor-plan');
+            state.ban = data.data;
+            await db.dining_tables.bulkPut(state.ban);
 
-    const idLuotDangChiem = [...new Set(state.ban.filter((b) => b.session).map((b) => b.session.id))];
-    await Promise.all(
-        idLuotDangChiem.map(async (id) => {
-            try {
-                const res = await api.get(`/table-sessions/${id}`);
-                state.thongTinLuot[id] = res.data.data;
-            } catch {
-                state.thongTinLuot[id] = null;
-            }
-        }),
-    );
+            const idLuotDangChiem = [...new Set(state.ban.filter((b) => b.session).map((b) => b.session.id))];
+            await Promise.all(
+                idLuotDangChiem.map(async (id) => {
+                    try {
+                        const res = await api.get(`/table-sessions/${id}`);
+                        state.thongTinLuot[id] = res.data.data;
+                    } catch {
+                        state.thongTinLuot[id] = null;
+                    }
+                }),
+            );
 
+            renderLuoiBan();
+            return;
+        } catch {
+            // Mạng vừa rớt giữa lúc tải — rơi xuống đọc kho cục bộ bên dưới,
+            // không chặn nhân viên đứng nhìn màn hình trắng.
+        }
+    }
+
+    // Mất mạng: đọc đúng những gì máy này đã biết — sơ đồ bàn lần cuối tải
+    // được khi còn mạng, cộng với mọi bàn/lượt khách mở lúc offline (đã ghi
+    // thẳng vào đây, xem moBanOffline()).
+    state.ban = await db.dining_tables.toArray();
     renderLuoiBan();
 }
 
@@ -101,7 +124,7 @@ function renderLuoiBan() {
             ${luot ? `<span class="mt-1 text-lg font-bold">${luot.total_amount_text}</span>` : ''}
             ${dangCho ? '<span class="mt-1 rounded bg-white/20 px-2 text-xs font-bold">CHỜ THANH TOÁN</span>' : ''}
         `;
-        o.addEventListener('click', () => (ban.is_occupied ? vaoManGoiMon(ban.session.id) : moModalMoBan(ban)));
+        o.addEventListener('click', () => (ban.is_occupied ? vaoManGoiMon(String(ban.session.id)) : moModalMoBan(ban)));
         luoi.appendChild(o);
     }
 }
@@ -148,19 +171,73 @@ document.getElementById('nut-xac-nhan-mo-ban').addEventListener('click', async (
     }
 
     const idGhep = [...document.querySelectorAll('#danh-sach-ban-trong-de-ghep input:checked')].map((i) => Number(i.value));
+    const idBanDaChon = [banDangMo.id, ...idGhep];
+
+    if (!navigator.onLine) {
+        await moBanOffline(idBanDaChon, soKhach);
+        return;
+    }
 
     try {
         const { data } = await api.post('/table-sessions', {
-            dining_table_ids: [banDangMo.id, ...idGhep],
+            uuid: taoUuid(),
+            dining_table_ids: idBanDaChon,
             primary_dining_table_id: banDangMo.id,
             guest_count: soKhach,
         });
         an(document.getElementById('modal-mo-ban'));
-        await vaoManGoiMon(data.data.id);
+        await vaoManGoiMon(String(data.data.id));
     } catch (loi) {
         bao(layThongBaoLoi(loi), 'loi');
     }
 });
+
+/**
+ * Mất mạng: không gọi API, ghi thẳng lượt khách mới vào kho Dexie và vào
+ * hàng chờ gửi — máy in bếp/quầy KHÔNG in được lúc này (server chưa biết
+ * gì cả), chỉ có server mới kích hoạt in tem thật (xem docs/viec-ton.md).
+ */
+async function moBanOffline(idBanDaChon, soKhach) {
+    const uuid = taoUuid();
+    const banChinh = banDangMo;
+    const banDaChon = state.ban.filter((b) => idBanDaChon.includes(b.id));
+    const tenBanDaChon = banDaChon.map((b) => ({ id: b.id, code: b.code, name: b.name, is_primary: b.id === banChinh.id }));
+
+    const luotMoi = {
+        key: uuid,
+        uuid,
+        id: null,
+        code: `TAM-${uuid.slice(0, 8).toUpperCase()}`,
+        status: 'open',
+        guest_count: soKhach,
+        opened_at: new Date().toISOString(),
+        tables: tenBanDaChon,
+        subtotal_amount: 0,
+        total_amount: 0,
+        total_amount_text: formatTien(0),
+        paid_amount: 0,
+        orders: [],
+    };
+
+    await db.table_sessions.put(luotMoi);
+
+    for (const ban of banDaChon) {
+        ban.is_occupied = true;
+        ban.session = { id: uuid, code: luotMoi.code, guest_count: soKhach, opened_at: luotMoi.opened_at, is_primary: ban.id === banChinh.id };
+        await db.dining_tables.put(ban);
+    }
+
+    await hangCho.themVaoHangCho({
+        type: 'mo-ban',
+        payload: { uuid, dining_table_ids: idBanDaChon, primary_dining_table_id: banChinh.id, guest_count: soKhach },
+        tableSessionUuid: uuid,
+        deviceId: maThietBi,
+    });
+
+    an(document.getElementById('modal-mo-ban'));
+    bao('Đã mở bàn (đang mất mạng) — sẽ tự gửi lên khi có mạng lại.');
+    await vaoManGoiMon(uuid);
+}
 
 /* ---------- Màn gọi món ---------- */
 
@@ -168,14 +245,42 @@ async function taiThucDonNeuChua() {
     if (state.menu.length > 0) {
         return;
     }
-    const { data } = await api.get('/menu');
-    state.menu = data.data;
+
+    if (navigator.onLine) {
+        try {
+            const { data } = await api.get('/menu');
+            state.menu = data.data;
+            state.nhomDangChon = state.menu[0]?.id ?? null;
+            return;
+        } catch {
+            // rơi xuống đọc kho cục bộ
+        }
+    }
+
+    state.menu = await docThucDonTuKho();
     state.nhomDangChon = state.menu[0]?.id ?? null;
 }
 
-async function vaoManGoiMon(sessionId) {
-    const { data } = await api.get(`/table-sessions/${sessionId}`);
-    state.luotHienTai = data.data;
+/**
+ * `key` là String(id) cho lượt khách server đã biết, hoặc uuid cho lượt
+ * khách vừa mở lúc offline. Luôn thử đọc kho Dexie trước — lượt khách vừa
+ * mở offline CHỈ có ở đó, server chưa từng nghe tới.
+ */
+async function vaoManGoiMon(key) {
+    let luot = await db.table_sessions.get(key);
+
+    if (!luot) {
+        if (!navigator.onLine) {
+            bao('Không tìm thấy lượt khách này trong kho cục bộ. Cần có mạng để mở lại.', 'loi');
+            return;
+        }
+
+        const { data } = await api.get(`/table-sessions/${key}`);
+        luot = { ...data.data, key: String(data.data.id) };
+        await db.table_sessions.put(luot);
+    }
+
+    state.luotHienTai = luot;
     state.gio = [];
 
     await taiThucDonNeuChua();
@@ -311,11 +416,16 @@ document.getElementById('nut-them-vao-gio').addEventListener('click', () => {
     }
 
     const bienThe = mon.variants.find((v) => v.id === variantId);
-    const tuyChonDaChon = mon.option_groups.flatMap((n) => n.options.filter((o) => optionIds.has(o.id)).map((o) => ({ id: o.id, name: o.name, groupName: n.name, priceDelta: o.price_delta })));
+    // uuid sinh NGAY LÚC THÊM VÀO GIỎ, không sinh lại lúc bấm Gửi bếp — bấm
+    // Gửi bếp thất bại rồi thử lại (mạng lag) vẫn gửi đúng uuid cũ, server
+    // không tạo trùng dòng món (PlaceOrder::taoDongMon()).
+    const tuyChonDaChon = mon.option_groups.flatMap((n) => n.options.filter((o) => optionIds.has(o.id)).map((o) => ({ id: o.id, uuid: taoUuid(), name: o.name, groupName: n.name, priceDelta: o.price_delta })));
     const tienTuyChon = tuyChonDaChon.reduce((t, o) => t + o.priceDelta, 0);
+    const idTam = taoUuid();
 
     state.gio.push({
-        idTam: taoUuid(),
+        idTam,
+        uuid: idTam,
         productId: mon.id,
         productName: mon.name,
         variantId: bienThe.id,
@@ -398,7 +508,7 @@ document.getElementById('nut-xem-da-gui').addEventListener('click', () => {
             .map(
                 (don) => `
             <div class="mb-3 rounded-lg border border-neutral-200 p-2">
-                <div class="mb-1 text-sm font-bold text-neutral-500">Phiếu #${don.sequence_no} — ${don.station === 'kitchen' ? 'Bếp' : 'Quầy'} — ${don.status}</div>
+                <div class="mb-1 text-sm font-bold text-neutral-500">${don.sequence_no !== null ? `Phiếu #${don.sequence_no}` : 'Phiếu tạm'} — ${don.station === 'kitchen' ? 'Bếp' : 'Quầy'} — ${don.status}</div>
                 ${don.items
                     .map(
                         (m) => `<div class="flex justify-between text-sm ${m.status === 'cancelled' ? 'text-red-500 line-through' : ''}">
@@ -424,30 +534,43 @@ document.getElementById('nut-gui-bep').addEventListener('click', () => {
 });
 document.getElementById('nut-huy-xac-nhan-gui').addEventListener('click', () => an(document.getElementById('modal-xac-nhan-gui-bep')));
 
+/** Payload đúng hợp đồng PlaceOrderRequest thật (Phase 2 Bước 2) — mỗi dòng món và mỗi tuỳ chọn có uuid riêng. */
+function xayItemsChoTram(dongCuaTram) {
+    return dongCuaTram.map((d) => ({
+        uuid: d.uuid,
+        product_id: d.productId,
+        product_variant_id: d.variantId,
+        quantity: d.quantity,
+        note: d.note,
+        options: d.options.map((o) => ({ option_id: o.id, uuid: o.uuid })),
+    }));
+}
+
 document.getElementById('nut-dong-y-gui-bep').addEventListener('click', async () => {
     an(document.getElementById('modal-xac-nhan-gui-bep'));
     const nutGui = document.getElementById('nut-gui-bep');
     nutGui.disabled = true;
     nutGui.textContent = 'Đang gửi...';
 
-    try {
-        const theoTram = { kitchen: [], bar: [] };
-        for (const dong of state.gio) {
-            theoTram[dong.station].push(dong);
-        }
+    const theoTram = { kitchen: [], bar: [] };
+    for (const dong of state.gio) {
+        theoTram[dong.station].push(dong);
+    }
 
+    if (!navigator.onLine) {
+        await goiMonOffline(theoTram);
+        nutGui.textContent = 'Gửi bếp';
+        nutGui.disabled = state.gio.length === 0;
+        return;
+    }
+
+    try {
         for (const tram of ['kitchen', 'bar']) {
             if (theoTram[tram].length === 0) continue;
 
             const { data } = await api.post(`/table-sessions/${state.luotHienTai.id}/orders`, {
                 uuid: taoUuid(),
-                items: theoTram[tram].map((d) => ({
-                    product_id: d.productId,
-                    product_variant_id: d.variantId,
-                    quantity: d.quantity,
-                    note: d.note,
-                    option_ids: d.options.map((o) => o.id),
-                })),
+                items: xayItemsChoTram(theoTram[tram]),
             });
 
             await api.post(`/orders/${data.data.id}/send`);
@@ -456,7 +579,8 @@ document.getElementById('nut-dong-y-gui-bep').addEventListener('click', async ()
         bao('Đã gửi bếp.');
         state.gio = [];
         const { data: luotMoi } = await api.get(`/table-sessions/${state.luotHienTai.id}`);
-        state.luotHienTai = luotMoi.data;
+        state.luotHienTai = { ...luotMoi.data, key: state.luotHienTai.key };
+        await db.table_sessions.put(state.luotHienTai);
         renderThongTinBan();
         renderGio();
     } catch (loi) {
@@ -466,6 +590,72 @@ document.getElementById('nut-dong-y-gui-bep').addEventListener('click', async ()
         nutGui.disabled = state.gio.length === 0;
     }
 });
+
+/**
+ * Mất mạng: KHÔNG gọi API — ghi dòng món vào kho cục bộ + hàng chờ gửi,
+ * cập nhật tạm tính hiển thị TẠI MÁY NÀY. Không in được tem thật lúc này
+ * (server chưa nhận được gì để kích hoạt in) — xem docs/viec-ton.md.
+ *
+ * Một dòng hàng chờ kiểu 'goi-mon' gộp đủ dữ liệu cho CẢ HAI bước server
+ * thật cần (PlaceOrder rồi SendToKitchen) — Bước 4 khi gửi lên sẽ tự gọi
+ * lần lượt hai API đó, không cần queue thành hai dòng riêng.
+ */
+async function goiMonOffline(theoTram) {
+    let subtotalCongThem = 0;
+    const phieuTamMoi = [];
+
+    for (const tram of ['kitchen', 'bar']) {
+        if (theoTram[tram].length === 0) continue;
+
+        const orderUuid = taoUuid();
+        const items = xayItemsChoTram(theoTram[tram]);
+
+        await hangCho.themVaoHangCho({
+            type: 'goi-mon',
+            payload: { orderUuid, tableSessionUuid: state.luotHienTai.uuid, station: tram, items },
+            tableSessionUuid: state.luotHienTai.uuid,
+            deviceId: maThietBi,
+        });
+
+        for (const dong of theoTram[tram]) {
+            await db.order_items.put({
+                uuid: dong.uuid,
+                table_session_uuid: state.luotHienTai.uuid,
+                order_uuid: orderUuid,
+                product_name: dong.productName,
+                variant_name: dong.variantName,
+                quantity: dong.quantity,
+                line_amount: dong.lineAmount,
+                status: 'ordered',
+            });
+            subtotalCongThem += dong.lineAmount;
+        }
+
+        phieuTamMoi.push({
+            sequence_no: null,
+            station: tram,
+            status: 'sent (đang chờ mạng)',
+            items: theoTram[tram].map((d) => ({
+                product_name: d.productName,
+                variant_name: d.variantName,
+                quantity: d.quantity,
+                status: 'ordered',
+                line_amount_text: formatTien(d.lineAmount),
+            })),
+        });
+    }
+
+    state.luotHienTai.subtotal_amount += subtotalCongThem;
+    state.luotHienTai.total_amount = state.luotHienTai.subtotal_amount;
+    state.luotHienTai.total_amount_text = formatTien(state.luotHienTai.total_amount);
+    state.luotHienTai.orders = [...(state.luotHienTai.orders ?? []), ...phieuTamMoi];
+    await db.table_sessions.put(state.luotHienTai);
+
+    bao('Đã gửi bếp (đang mất mạng) — sẽ tự gửi lên khi có mạng lại.');
+    state.gio = [];
+    renderThongTinBan();
+    renderGio();
+}
 
 /* ---------- In tạm tính ---------- */
 
@@ -494,15 +684,38 @@ document.getElementById('nut-in-tam-tinh').addEventListener('click', async () =>
 let hoaDonThu = null;
 
 document.getElementById('nut-thu-tien').addEventListener('click', async () => {
-    try {
-        const { data } = await api.get(`/table-sessions/${state.luotHienTai.id}/bill`);
-        hoaDonThu = data.data;
-        renderModalThuTien();
-        hien(document.getElementById('modal-thu-tien'));
-    } catch (loi) {
-        bao(layThongBaoLoi(loi), 'loi');
+    if (navigator.onLine) {
+        try {
+            const { data } = await api.get(`/table-sessions/${state.luotHienTai.id}/bill`);
+            hoaDonThu = data.data;
+            renderModalThuTien();
+            hien(document.getElementById('modal-thu-tien'));
+        } catch (loi) {
+            bao(layThongBaoLoi(loi), 'loi');
+        }
+        return;
     }
+
+    // Mất mạng: không có /bill của server, tự tính từ những gì máy này biết.
+    hoaDonThu = xayHoaDonTuKho(state.luotHienTai);
+    renderModalThuTien();
+    hien(document.getElementById('modal-thu-tien'));
 });
+
+function xayHoaDonTuKho(luot) {
+    const total = luot.total_amount ?? 0;
+    const paid = luot.paid_amount ?? 0;
+    const remaining = Math.max(0, total - paid);
+
+    return {
+        total_amount: total,
+        total_amount_text: formatTien(total),
+        paid_amount: paid,
+        paid_amount_text: formatTien(paid),
+        remaining_amount: remaining,
+        remaining_amount_text: formatTien(remaining),
+    };
+}
 
 function renderModalThuTien() {
     document.getElementById('tt-tong').textContent = hoaDonThu.total_amount_text;
@@ -513,6 +726,13 @@ function renderModalThuTien() {
     document.getElementById('tien-thoi').textContent = formatTien(0);
     document.getElementById('loi-thu-tien').classList.add('hidden');
     chonPhuongThuc('cash');
+
+    // Mục 3: chuyển khoản cần mạng để xác nhận, không cho chọn khi offline.
+    const nutChuyenKhoan = document.querySelector('.nut-phuong-thuc[data-method="transfer"]');
+    if (nutChuyenKhoan) {
+        nutChuyenKhoan.disabled = !navigator.onLine;
+        nutChuyenKhoan.classList.toggle('opacity-40', !navigator.onLine);
+    }
 }
 
 function chonPhuongThuc(phuongThuc) {
@@ -531,6 +751,42 @@ function chonPhuongThuc(phuongThuc) {
 for (const nut of document.querySelectorAll('.nut-phuong-thuc')) {
     nut.addEventListener('click', () => chonPhuongThuc(nut.dataset.method));
 }
+
+/* ---------- Mã QR chuyển khoản (Phase 2 Bước 7) ----------
+ * CHỈ hiện mã cho khách quét — không tự động xác nhận gì cả. Thu ngân nhìn
+ * điện thoại thấy tiền vào rồi tự đóng modal này, quay lại ô "Mã tham chiếu"
+ * và bấm "Xác nhận thu" như luồng chuyển khoản đã có từ trước.
+ */
+document.getElementById('nut-hien-qr').addEventListener('click', async () => {
+    const modalQr = document.getElementById('modal-qr');
+    const dangTai = document.getElementById('qr-dang-tai');
+    const loiO = document.getElementById('qr-loi');
+    const noiDung = document.getElementById('qr-noi-dung');
+
+    dangTai.classList.remove('hidden');
+    loiO.classList.add('hidden');
+    noiDung.classList.add('hidden');
+    hien(modalQr);
+
+    try {
+        const { data } = await api.get(`/table-sessions/${state.luotHienTai.id}/vietqr`);
+        const qr = data.data;
+
+        await QRCode.toCanvas(document.getElementById('qr-canvas'), qr.payload, { width: 280 });
+        document.getElementById('qr-so-tien').textContent = qr.amount_text;
+        document.getElementById('qr-chu-tai-khoan').textContent = `Chủ tài khoản: ${qr.account_name}`;
+        document.getElementById('qr-noi-dung-ck').textContent = qr.table_session_code;
+
+        dangTai.classList.add('hidden');
+        noiDung.classList.remove('hidden');
+    } catch (loi) {
+        dangTai.classList.add('hidden');
+        loiO.textContent = layThongBaoLoi(loi);
+        loiO.classList.remove('hidden');
+    }
+});
+
+document.getElementById('nut-dong-modal-qr').addEventListener('click', () => an(document.getElementById('modal-qr')));
 
 for (const nut of document.querySelectorAll('.nut-tien-nhanh')) {
     nut.addEventListener('click', () => {
@@ -568,6 +824,18 @@ document.getElementById('nut-xac-nhan-thu-tien').addEventListener('click', async
         return;
     }
 
+    if (!navigator.onLine) {
+        const { duocPhep, thongBao } = duocPhepKhiMatMang(phuongThuc === 'cash' ? 'thu-tien-mat' : 'thu-tien-chuyen-khoan', false);
+        if (!duocPhep) {
+            loiO.textContent = thongBao;
+            loiO.classList.remove('hidden');
+            return;
+        }
+
+        await thuTienOffline(soTienThu, khachDua, loiO);
+        return;
+    }
+
     const nut = document.getElementById('nut-xac-nhan-thu-tien');
     nut.disabled = true;
     nut.textContent = 'Đang xử lý...';
@@ -582,7 +850,8 @@ document.getElementById('nut-xac-nhan-thu-tien').addEventListener('click', async
         });
 
         const { data: luotMoi } = await api.get(`/table-sessions/${state.luotHienTai.id}`);
-        state.luotHienTai = luotMoi.data;
+        state.luotHienTai = { ...luotMoi.data, key: state.luotHienTai.key };
+        await db.table_sessions.put(state.luotHienTai);
 
         if (luotMoi.data.status === 'closed') {
             bao('Đã thu đủ tiền, bàn đã được nhả.');
@@ -603,6 +872,62 @@ document.getElementById('nut-xac-nhan-thu-tien').addEventListener('click', async
         nut.textContent = 'Xác nhận thu';
     }
 });
+
+/**
+ * Mất mạng, thu tiền mặt. Mục 4: chặn nếu MÁY NÀY đã thấy một thao tác thu
+ * tiền offline khác từ máy khác cho đúng lượt khách này — hai máy cô lập
+ * hoàn toàn với nhau thì lớp hàng chờ không có cách nào biết được, xem
+ * comment trong lib/queue.js.
+ */
+async function thuTienOffline(soTienThu, khachDua, loiO) {
+    const bi = await hangCho.coThuTienOfflineTuMayKhac(state.luotHienTai.uuid, maThietBi);
+    if (bi) {
+        loiO.textContent = 'Lượt khách này có thể đã được thu tiền ở một máy khác lúc mất mạng. Cần có mạng để kiểm tra lại trước khi thu tiếp.';
+        loiO.classList.remove('hidden');
+        return;
+    }
+
+    const nut = document.getElementById('nut-xac-nhan-thu-tien');
+    nut.disabled = true;
+    nut.textContent = 'Đang xử lý...';
+
+    const uuid = taoUuid();
+    await hangCho.themVaoHangCho({
+        type: 'thu-tien-mat',
+        payload: { uuid, tableSessionUuid: state.luotHienTai.uuid, amount: soTienThu, tendered_amount: khachDua },
+        tableSessionUuid: state.luotHienTai.uuid,
+        deviceId: maThietBi,
+    });
+
+    state.luotHienTai.paid_amount = (state.luotHienTai.paid_amount ?? 0) + soTienThu;
+
+    if (state.luotHienTai.paid_amount >= state.luotHienTai.total_amount) {
+        state.luotHienTai.status = 'closed';
+        await db.table_sessions.put(state.luotHienTai);
+
+        for (const banRut of state.luotHienTai.tables) {
+            const banDb = await db.dining_tables.get(banRut.id);
+            if (banDb) {
+                banDb.is_occupied = false;
+                banDb.session = null;
+                await db.dining_tables.put(banDb);
+            }
+        }
+
+        bao('Đã thu đủ tiền (đang mất mạng) — sẽ tự gửi lên khi có mạng lại. Bàn đã được nhả.');
+        an(document.getElementById('modal-thu-tien'));
+        veManSoDoBan();
+    } else {
+        await db.table_sessions.put(state.luotHienTai);
+        bao('Đã ghi nhận thu tiền (đang mất mạng).');
+        hoaDonThu = xayHoaDonTuKho(state.luotHienTai);
+        renderModalThuTien();
+        renderThongTinBan();
+    }
+
+    nut.disabled = false;
+    nut.textContent = 'Xác nhận thu';
+}
 
 /* ---------- Khoá màn hình bằng PIN ---------- */
 
@@ -678,6 +1003,229 @@ document.getElementById('nut-doi-tai-khoan').addEventListener('click', async () 
     window.location.href = '/dang-nhap';
 });
 
+/* ---------- Trạng thái mạng (Phase 2 Bước 3 mục 5) ---------- */
+
+const chiBaoMang = {
+    elCham: document.getElementById('cham-trang-thai-mang'),
+    elSoViecDangCho: document.getElementById('so-viec-dang-cho'),
+    elDaiCanhBao: document.getElementById('dai-canh-bao-mat-mang'),
+};
+
+theoDoiTrangThaiMang({
+    layTiepSoViecDangCho: () => hangCho.demSoViecDangCho(),
+    onDoi: (trangThai) => capNhatChiBaoMang(chiBaoMang, trangThai),
+});
+
+/* ---------- Xung đột đồng bộ chờ xử lý (Phase 2 Bước 5, sửa 04/08) ----------
+ * Xử lý NGAY TRÊN MÁY POS bằng lớp phủ (modal) — không rời màn hình bán
+ * hàng, không đăng nhập lại sang hệ khác. Trang Filament (/admin) giờ chỉ
+ * còn là đường phụ để chủ quán xem lại lịch sử, xem docs/viec-ton.md.
+ */
+
+const nutXungDot = document.getElementById('nut-xung-dot');
+const soXungDot = document.getElementById('so-xung-dot');
+const modalXungDot = document.getElementById('modal-xung-dot');
+const noiDungXungDot = document.getElementById('noi-dung-xung-dot');
+
+// Phương án nào cần chọn bàn khác — khớp đúng các khoá đã lưu ở
+// app/Domain/Sync/Actions/ResolveSyncConflict.php.
+const PHUONG_AN_CAN_CHON_BAN = ['tach', 'mo_luot_moi', 'tao_luot_moi'];
+
+nutXungDot?.addEventListener('click', moModalXungDot);
+document.getElementById('nut-dong-modal-xung-dot')?.addEventListener('click', () => an(modalXungDot));
+
+async function capNhatChamXungDot() {
+    try {
+        const { data } = await api.get('/sync/conflicts/pending-count');
+        const soLuong = data.data.pending;
+
+        if (soLuong > 0) {
+            soXungDot.textContent = soLuong;
+            nutXungDot.classList.remove('hidden');
+            nutXungDot.classList.add('flex');
+        } else {
+            nutXungDot.classList.add('hidden');
+            nutXungDot.classList.remove('flex');
+        }
+    } catch {
+        // Không hỏi được (mất mạng, hết phiên...) — giữ nguyên trạng thái cũ,
+        // không phải lỗi cần chặn màn hình bán hàng.
+    }
+}
+
+async function moModalXungDot() {
+    noiDungXungDot.innerHTML = '<p class="text-center text-neutral-500">Đang tải...</p>';
+    hien(modalXungDot);
+
+    try {
+        const { data } = await api.get('/sync/conflicts', { params: { status: 'pending' } });
+        veDanhSachXungDot(data.data);
+    } catch (loi) {
+        noiDungXungDot.innerHTML = `<p class="text-center text-red-600">${layThongBaoLoi(loi)}</p>`;
+    }
+}
+
+function veDanhSachXungDot(danhSach) {
+    if (danhSach.length === 0) {
+        noiDungXungDot.innerHTML = '<p class="text-center text-neutral-500">Không còn xung đột nào chờ xử lý.</p>';
+        return;
+    }
+
+    noiDungXungDot.innerHTML = danhSach
+        .map(
+            (xd) => `
+        <div class="mb-3 rounded-xl border-2 ${xd.is_urgent ? 'border-red-500' : 'border-neutral-200'} p-4">
+            ${xd.is_urgent ? '<p class="mb-1 text-sm font-bold text-red-600">GẤP — chặn thanh toán</p>' : ''}
+            <p class="mb-3">${xd.message_vi}</p>
+            <div class="grid grid-cols-2 gap-2">
+                <button type="button" class="nut-xu-ly-xung-dot h-12 rounded-lg bg-emerald-600 text-base font-bold text-white active:bg-emerald-700" data-id="${xd.id}">Xử lý</button>
+                <button type="button" class="nut-bo-qua-xung-dot h-12 rounded-lg bg-neutral-200 text-base font-bold active:bg-neutral-300" data-id="${xd.id}">Bỏ qua</button>
+            </div>
+        </div>
+    `,
+        )
+        .join('');
+
+    noiDungXungDot.querySelectorAll('.nut-xu-ly-xung-dot').forEach((btn) => {
+        btn.addEventListener('click', () => veChiTietXungDot(danhSach.find((x) => String(x.id) === btn.dataset.id), danhSach, false));
+    });
+    noiDungXungDot.querySelectorAll('.nut-bo-qua-xung-dot').forEach((btn) => {
+        btn.addEventListener('click', () => veChiTietXungDot(danhSach.find((x) => String(x.id) === btn.dataset.id), danhSach, true));
+    });
+}
+
+function veChiTietXungDot(xd, danhSach, boQua) {
+    const banTrong = state.ban.filter((b) => !b.is_occupied);
+
+    noiDungXungDot.innerHTML = `
+        <p class="mb-3">${xd.message_vi}</p>
+        ${
+            !boQua
+                ? `
+        <div class="mb-3">
+            ${xd.options
+                .map(
+                    (o) => `
+                <label class="mb-2 flex items-start gap-2 rounded-lg border-2 border-neutral-200 p-3">
+                    <input type="radio" name="phuong-an-xung-dot" value="${o.key}" class="mt-1">
+                    <span>${o.label}</span>
+                </label>
+            `,
+                )
+                .join('')}
+        </div>
+        <div id="vung-chon-ban-xung-dot" class="mb-3 hidden">
+            <label class="mb-1 block text-base font-medium">Chọn bàn khác (giữ Ctrl để chọn nhiều bàn)</label>
+            <select id="chon-ban-xung-dot" multiple class="h-24 w-full rounded-xl border-2 border-neutral-300 px-2">
+                ${banTrong.map((b) => `<option value="${b.id}">${b.code}</option>`).join('')}
+            </select>
+        </div>
+        `
+                : ''
+        }
+        ${
+            xd.requires_pin
+                ? `
+        <div class="mb-3">
+            <label class="mb-1 block text-base font-medium">Mã PIN duyệt (bắt buộc — xung đột liên quan tới tiền)</label>
+            <input id="pin-duyet-xung-dot" type="password" inputmode="numeric" class="h-14 w-full rounded-xl border-2 border-neutral-300 px-4 text-lg" placeholder="Mã PIN của bạn">
+        </div>
+        `
+                : ''
+        }
+        <div class="mb-3">
+            <label class="mb-1 block text-base font-medium">Lý do</label>
+            <textarea id="ly-do-xung-dot" rows="2" class="w-full rounded-xl border-2 border-neutral-300 px-4 py-2 text-lg"></textarea>
+        </div>
+        <p id="loi-xung-dot" class="mb-2 hidden rounded-lg bg-red-50 px-4 py-2 text-center font-medium text-red-700"></p>
+        <div class="grid grid-cols-2 gap-3">
+            <button type="button" id="nut-huy-chi-tiet-xung-dot" class="h-14 rounded-xl bg-neutral-200 text-lg font-bold active:bg-neutral-300">Quay lại</button>
+            <button type="button" id="nut-xac-nhan-xung-dot" class="h-14 rounded-xl bg-blue-700 text-lg font-bold text-white active:bg-blue-800">Xác nhận</button>
+        </div>
+    `;
+
+    if (!boQua) {
+        noiDungXungDot.querySelectorAll('input[name="phuong-an-xung-dot"]').forEach((radio) => {
+            radio.addEventListener('change', () => {
+                document
+                    .getElementById('vung-chon-ban-xung-dot')
+                    .classList.toggle('hidden', !PHUONG_AN_CAN_CHON_BAN.includes(radio.value));
+            });
+        });
+    }
+
+    document.getElementById('nut-huy-chi-tiet-xung-dot').addEventListener('click', () => veDanhSachXungDot(danhSach));
+    document.getElementById('nut-xac-nhan-xung-dot').addEventListener('click', () => guiXuLyXungDot(xd, boQua));
+}
+
+async function guiXuLyXungDot(xd, boQua) {
+    const loiEl = document.getElementById('loi-xung-dot');
+    loiEl.classList.add('hidden');
+
+    const lyDo = document.getElementById('ly-do-xung-dot').value.trim();
+    if (lyDo === '') {
+        loiEl.textContent = 'Phải ghi rõ lý do quyết định.';
+        loiEl.classList.remove('hidden');
+        return;
+    }
+
+    const payload = { dismiss: boQua, note: lyDo };
+
+    if (!boQua) {
+        const chon = noiDungXungDot.querySelector('input[name="phuong-an-xung-dot"]:checked');
+        if (!chon) {
+            loiEl.textContent = 'Phải chọn một phương án xử lý.';
+            loiEl.classList.remove('hidden');
+            return;
+        }
+        payload.resolution = chon.value;
+
+        const vungChonBan = document.getElementById('vung-chon-ban-xung-dot');
+        if (vungChonBan && !vungChonBan.classList.contains('hidden')) {
+            payload.dining_table_ids = Array.from(document.getElementById('chon-ban-xung-dot').selectedOptions).map((o) => Number(o.value));
+        }
+    }
+
+    if (xd.requires_pin) {
+        const pin = document.getElementById('pin-duyet-xung-dot').value.trim();
+        if (pin === '') {
+            loiEl.textContent = 'Xung đột liên quan tới tiền bắt buộc có mã PIN duyệt.';
+            loiEl.classList.remove('hidden');
+            return;
+        }
+        payload.approver_user_id = state.nguoiDung.id;
+        payload.approver_pin = pin;
+    }
+
+    try {
+        await api.post(`/sync/conflicts/${xd.id}/resolve`, payload);
+        bao('Đã xử lý xung đột.');
+        await capNhatChamXungDot();
+        await moModalXungDot();
+    } catch (loi) {
+        loiEl.textContent = layThongBaoLoi(loi);
+        loiEl.classList.remove('hidden');
+    }
+}
+
 /* ---------- Khởi động ---------- */
 
-veManSoDoBan();
+async function khoiDong() {
+    maThietBi = await layMaThietBi();
+
+    if (navigator.onLine) {
+        try {
+            await dongBoThucDonNeuCoMang();
+        } catch {
+            // Không đồng bộ được thực đơn lúc vào máy — vẫn cho bán hàng
+            // bằng bản thực đơn cũ đã có sẵn trong kho, không chặn màn hình.
+        }
+
+        capNhatChamXungDot();
+        setInterval(capNhatChamXungDot, 30_000);
+    }
+
+    veManSoDoBan();
+}
+
+khoiDong();

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Ordering\Models;
 
 use App\Domain\Billing\Models\Payment;
+use App\Domain\Billing\Models\Promotion;
 use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
@@ -35,6 +36,7 @@ final class TableSession extends Model
         'subtotal_amount',
         'discount_amount',
         'discount_reason',
+        'promotion_id',
         'total_amount',
         'paid_amount',
         'bill_no',
@@ -107,5 +109,11 @@ final class TableSession extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    /** @return BelongsTo<Promotion, $this> */
+    public function promotion(): BelongsTo
+    {
+        return $this->belongsTo(Promotion::class);
     }
 }

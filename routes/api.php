@@ -12,7 +12,10 @@ use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\OrderItemController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\ShiftController;
+use App\Http\Controllers\Api\SyncBatchController;
+use App\Http\Controllers\Api\SyncConflictController;
 use App\Http\Controllers\Api\TableSessionController;
+use App\Http\Controllers\Api\VietQrController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -52,6 +55,7 @@ Route::prefix('v1')->group(function (): void {
             Route::post('{tableSession}/void', [TableSessionController::class, 'void'])->middleware('idempotent');
             Route::post('{tableSession}/orders', [OrderController::class, 'store'])->middleware('idempotent');
             Route::get('{tableSession}/bill', [BillController::class, 'show']);
+            Route::get('{tableSession}/vietqr', [VietQrController::class, 'show']);
             Route::post('{tableSession}/discount', [TableSessionController::class, 'discount'])->middleware('idempotent');
             Route::post('{tableSession}/payments', [PaymentController::class, 'store'])->middleware('idempotent');
         });
@@ -70,6 +74,15 @@ Route::prefix('v1')->group(function (): void {
         Route::prefix('kds')->group(function (): void {
             Route::get('tickets', [KdsController::class, 'tickets']);
             Route::post('items/{orderItem}/status', [KdsController::class, 'updateItemStatus'])->middleware('idempotent');
+        });
+
+        // Không dùng middleware 'idempotent' (header Idempotency-Key) — gói này
+        // tự chống trùng theo op_uuid của TỪNG thao tác bên trong, xem SyncBatch.
+        Route::prefix('sync')->group(function (): void {
+            Route::post('batch', [SyncBatchController::class, 'store']);
+            Route::get('conflicts', [SyncConflictController::class, 'index']);
+            Route::get('conflicts/pending-count', [SyncConflictController::class, 'pendingCount']);
+            Route::post('conflicts/{conflict}/resolve', [SyncConflictController::class, 'resolve'])->middleware('idempotent');
         });
     });
 });

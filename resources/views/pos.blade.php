@@ -9,6 +9,11 @@
 <body class="h-screen w-screen overflow-hidden bg-neutral-100 font-sans text-neutral-900 antialiased select-none">
 
     <div id="man-pos" class="flex h-full w-full flex-col">
+        {{-- Phase 2 Bước 3 mục 5: dải cảnh báo mất mạng — full-width, chữ to, nhìn được từ 1 mét --}}
+        <div id="dai-canh-bao-mat-mang" class="hidden shrink-0 bg-orange-500 px-4 py-2 text-center text-lg font-bold text-white">
+            ĐANG MẤT MẠNG — vẫn bán được, sẽ tự gửi lên khi có mạng lại
+        </div>
+
         {{-- Thanh trên cùng --}}
         <header class="flex h-16 shrink-0 items-center justify-between bg-neutral-900 px-4 text-white">
             <div class="flex items-center gap-3">
@@ -18,6 +23,16 @@
                 <span id="tieu-de-man" class="text-xl font-bold">Sơ đồ bàn</span>
             </div>
             <div class="flex items-center gap-2">
+                {{-- Phase 2 Bước 3 mục 5: chấm trạng thái mạng — xanh (đã gửi hết) / vàng (đang gửi, kèm số việc còn chờ) / cam (mất mạng, dải cảnh báo ở trên đã hiện to rồi) --}}
+                <span class="mr-2 flex items-center gap-1.5">
+                    <span id="cham-trang-thai-mang" class="h-3 w-3 rounded-full bg-emerald-500"></span>
+                    <span id="so-viec-dang-cho" class="hidden text-sm font-bold"></span>
+                </span>
+                {{-- Phase 2 Bước 5: chấm đỏ + số lượng xung đột đồng bộ đang chờ chủ quán/thu ngân xử lý --}}
+                <button id="nut-xung-dot" class="hidden mr-2 items-center gap-1.5 rounded-lg bg-red-700 px-3 py-1.5 text-sm font-bold active:bg-red-800">
+                    <span class="h-2.5 w-2.5 rounded-full bg-white"></span>
+                    <span id="so-xung-dot"></span> xung đột chờ xử lý
+                </button>
                 <span id="ten-nguoi-dung" class="mr-2 text-lg"></span>
                 <button id="nut-khoa-man-hinh" class="h-12 min-w-[60px] rounded-lg bg-neutral-700 px-4 text-lg font-bold active:bg-neutral-600">Khoá màn hình</button>
                 <button id="nut-dang-xuat" class="h-12 min-w-[60px] rounded-lg bg-red-700 px-4 text-lg font-bold active:bg-red-800">Đăng xuất</button>
@@ -137,6 +152,10 @@
             </div>
 
             <div id="vung-chuyen-khoan" class="hidden mb-2">
+                {{-- Phase 2 Bước 7: chỉ HIỆN mã QR cho khách quét — thu ngân vẫn tự
+                     mắt xác nhận tiền vào rồi bấm "Xác nhận thu" như cũ, không có gì
+                     tự động ở đây. --}}
+                <button id="nut-hien-qr" type="button" class="mb-2 h-14 w-full rounded-xl border-2 border-blue-600 text-lg font-bold text-blue-700 active:bg-blue-50">Hiện mã QR chuyển khoản</button>
                 <label class="mb-1 block text-base font-medium">Mã tham chiếu (không bắt buộc)</label>
                 <input id="ma-tham-chieu" type="text" class="h-14 w-full rounded-xl border-2 border-neutral-300 px-4 text-lg">
             </div>
@@ -155,12 +174,38 @@
         </div>
     </div>
 
+    {{-- Modal mã QR chuyển khoản (Phase 2 Bước 7) — chỉ HIỆN, không tự xác nhận --}}
+    <div id="modal-qr" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/70 p-4">
+        <div class="w-full max-w-sm rounded-2xl bg-white p-6 text-center">
+            <h2 class="mb-3 text-xl font-bold">Quét mã để chuyển khoản</h2>
+            <div id="qr-dang-tai" class="py-10 text-neutral-500">Đang tạo mã...</div>
+            <div id="qr-loi" class="hidden rounded-lg bg-red-50 px-4 py-3 font-medium text-red-700"></div>
+            <div id="qr-noi-dung" class="hidden">
+                <canvas id="qr-canvas" class="mx-auto"></canvas>
+                <p class="mt-3 text-3xl font-bold text-blue-700" id="qr-so-tien"></p>
+                <p class="mt-1 text-lg" id="qr-chu-tai-khoan"></p>
+                <p class="mt-1 text-sm text-neutral-500">Nội dung: <span id="qr-noi-dung-ck" class="font-medium"></span></p>
+            </div>
+            <button id="nut-dong-modal-qr" class="mt-5 h-14 w-full rounded-xl bg-neutral-200 text-lg font-bold active:bg-neutral-300">Đóng</button>
+        </div>
+    </div>
+
     {{-- Modal xem tạm tính / đã gửi --}}
     <div id="modal-xem" class="fixed inset-0 z-30 hidden items-center justify-center bg-black/50 p-4">
         <div class="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6">
             <h2 id="tieu-de-modal-xem" class="mb-4 text-xl font-bold"></h2>
             <div id="noi-dung-modal-xem" class="text-base"></div>
             <button id="nut-dong-modal-xem" class="mt-4 h-14 w-full rounded-xl bg-neutral-200 text-lg font-bold active:bg-neutral-300">Đóng</button>
+        </div>
+    </div>
+
+    {{-- Modal xung đột đồng bộ chờ xử lý (Phase 2 Bước 5, sửa 04/08) — xử lý
+         NGAY TẠI ĐÂY, không rời màn hình bán hàng, không đăng nhập lại. --}}
+    <div id="modal-xung-dot" class="fixed inset-0 z-30 hidden items-center justify-center bg-black/50 p-4">
+        <div class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6">
+            <h2 class="mb-4 text-xl font-bold">Xung đột đồng bộ chờ xử lý</h2>
+            <div id="noi-dung-xung-dot" class="text-base"></div>
+            <button id="nut-dong-modal-xung-dot" class="mt-4 h-14 w-full rounded-xl bg-neutral-200 text-lg font-bold active:bg-neutral-300">Đóng</button>
         </div>
     </div>
 

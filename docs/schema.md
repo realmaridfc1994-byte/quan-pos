@@ -40,7 +40,7 @@ Lợi ích thực tế: cuối tháng anh mở ra xem được *"tháng này h�
 
 ## PHẦN 1 — DANH SÁCH BẢNG VÀ VAI TRÒ
 
-Tổng cộng **15 bảng**, chia 5 nhóm.
+Tổng cộng **20 bảng**, chia 8 nhóm.
 
 ### Nhóm A — Con người và ca làm việc
 
@@ -81,6 +81,26 @@ Tổng cộng **15 bảng**, chia 5 nhóm.
 | # | Bảng | Vai trò bằng ngôn ngữ quán |
 |---|---|---|
 | 15 | `payments` | **Từng lần thu tiền của một lượt khách.** Cho phép thu nhiều lần: khách đưa 500k tiền mặt, phần còn lại chuyển khoản. Ghi rõ khách đưa bao nhiêu, thối lại bao nhiêu, mã giao dịch chuyển khoản là gì. |
+
+### Nhóm F — Đồng bộ ngoại tuyến (Phase 2 Bước 4)
+
+| # | Bảng | Vai trò bằng ngôn ngữ quán |
+|---|---|---|
+| 16 | `sync_conflicts` | **Sổ chờ chủ quán quyết.** Ghi lại mọi trường hợp đồng bộ va chạm khi máy POS offline gửi lên (hai máy cùng mở một bàn, hai máy cùng thu tiền một lượt khách...) — 10 loại theo ma trận `docs/thiet-ke-dong-bo.md` mục 5. Máy không tự đoán, chỉ ghi lại rồi chờ người bấm quyết ở màn hình xử lý xung đột. |
+| 17 | `sync_applied_ops` | **Sổ chống trùng khi đồng bộ.** Máy POS gửi lại đúng một thao tác đã áp dụng xong (mạng rớt lúc trả kết quả, bấm gửi lại) thì tra sổ này để trả lại đúng kết quả cũ, không làm lại hai lần. Không phải dữ liệu giao dịch — được dọn định kỳ, khác `payments`/`orders`. |
+
+### Nhóm G — Khuyến mãi (Phase 2 Bước 6)
+
+| # | Bảng | Vai trò bằng ngôn ngữ quán |
+|---|---|---|
+| 18 | `promotions` | **Chương trình khuyến mãi chủ quán tự cấu hình.** Giảm %, giảm số tiền cố định, hoặc giờ vàng (giảm % chỉ trong khung giờ/ngày nhất định). Một lượt khách chỉ áp được **một** khuyến mãi — chốt bằng `table_sessions.promotion_id` (xem PHẦN 3). |
+
+### Nhóm H — Báo cáo tổng hợp (Phase 2 Bước 8)
+
+| # | Bảng | Vai trò bằng ngôn ngữ quán |
+|---|---|---|
+| 19 | `daily_summaries` | **Sổ tổng hợp MỘT NGÀY.** Doanh thu, số lượt khách, số khách, tiền mặt, chuyển khoản, giảm giá, số/giá trị món huỷ, chênh lệch két — ghi bởi việc tổng hợp chạy lúc đóng ca. Màn hình chủ quán CHỈ đọc từ đây, không bao giờ đọc thẳng `orders`. |
+| 20 | `product_sales_daily` | **Sổ bán hàng theo món, theo NGÀY.** Số lượng và doanh thu từng biến thể món bán ra trong ngày — nguồn cho "Top món bán chạy" trên màn hình chủ quán. |
 
 ### Vì sao 15 bảng, vượt mục tiêu 12?
 
@@ -240,6 +260,10 @@ CREATE TABLE table_sessions (
     subtotal_amount     BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Tổng tiền món chưa giảm giá (đồng)',
     discount_amount     BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Số tiền giảm trên tổng bill (đồng)',
     discount_reason     VARCHAR(255)    NULL COMMENT 'Bắt buộc ghi khi có giảm giá: "khách quen", "bớt lẻ"',
+    -- Phase 2 Bước 6: "một lượt khách một khuyến mãi". NULL = chưa áp khuyến
+    -- mãi nào. Không đổi/xoá sau khi đã áp — huỷ chương trình khuyến mãi
+    -- không xoá tham chiếu này, hoá đơn cũ vẫn trỏ đúng chương trình đã dùng.
+    promotion_id        BIGINT UNSIGNED NULL COMMENT 'Khuyến mãi đã áp, xem bảng promotions',
     total_amount        BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Số tiền khách phải trả = subtotal - discount',
     paid_amount         BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Đã thu được bao nhiêu (cộng dồn từ payments)',
 
@@ -271,6 +295,11 @@ CREATE TABLE table_sessions (
     CONSTRAINT fk_table_sessions_opened_by FOREIGN KEY (opened_by_user_id) REFERENCES users (id)  ON DELETE RESTRICT,
     CONSTRAINT fk_table_sessions_closed_by FOREIGN KEY (closed_by_user_id) REFERENCES users (id)  ON DELETE RESTRICT,
     CONSTRAINT fk_table_sessions_voided_by FOREIGN KEY (voided_by_user_id) REFERENCES users (id)  ON DELETE RESTRICT,
+    -- fk_table_sessions_promotion thêm bằng ALTER TABLE riêng, SAU KHI bảng
+    -- promotions (#18, cuối PHẦN 3) đã tồn tại — CREATE TABLE ở đây không thể
+    -- tự tham chiếu tới một bảng định nghĩa sau nó trong cùng tài liệu. Đúng
+    -- như thực tế hai migration riêng: create_promotions_table rồi mới tới
+    -- add_promotion_id_to_table_sessions_table.
     CONSTRAINT ck_table_sessions_discount CHECK (discount_amount <= subtotal_amount),
     -- Viết dạng cộng thay vì trừ: số tiền là kiểu KHÔNG ÂM, phép trừ ra số âm sẽ
     -- gây lỗi kiểu dữ liệu khó hiểu thay vì báo đúng ràng buộc bị vi phạm.
@@ -602,6 +631,155 @@ CREATE TABLE payments (
         status <> 'voided' OR (voided_at IS NOT NULL AND void_reason IS NOT NULL AND voided_by_user_id IS NOT NULL)
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 16. XUNG ĐỘT ĐỒNG BỘ (Phase 2 Bước 4) — docs/thiet-ke-dong-bo.md
+CREATE TABLE sync_conflicts (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    op_uuid             CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    batch_uuid          CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    device_id           VARCHAR(50)     NOT NULL,
+
+    op_type             VARCHAR(40)     NOT NULL COMMENT 'open_session, place_order, record_payment...',
+    conflict_kind       VARCHAR(40)     NOT NULL COMMENT '10 loại ở ma trận docs/thiet-ke-dong-bo.md mục 5',
+    is_urgent           TINYINT(1)      NOT NULL DEFAULT 0 COMMENT 'Chặn đường thanh toán — VD dòng 2: tem đã in, bếp đang nấu, bàn chưa thanh toán được',
+
+    occurred_at         DATETIME        NOT NULL COMMENT 'Giờ máy POS khai',
+    received_at         DATETIME        NOT NULL COMMENT 'Giờ server nhận',
+
+    payload             JSON            NOT NULL COMMENT 'Thao tác gốc, đủ để áp dụng lại. Với xung đột theo CỤM (dòng 2/6/9/10): chứa cả cụm — gốc + con, giữ nguyên thứ tự và depends_on',
+    server_state        JSON            NOT NULL COMMENT 'Trạng thái server lúc phát hiện',
+    auto_action         VARCHAR(40)     NULL COMMENT 'Server đã tự làm gì: nhan_mon, khong_lam_gi...',
+
+    message_vi          TEXT            NOT NULL COMMENT 'Câu giải thích cho chủ quán',
+    options             JSON            NOT NULL COMMENT 'Các lựa chọn + hậu quả từng cái',
+
+    table_session_id    BIGINT UNSIGNED NULL,
+    status              ENUM('pending','resolved','dismissed') NOT NULL DEFAULT 'pending',
+    resolution          VARCHAR(40)     NULL,
+    resolution_note     TEXT            NULL,
+    resolved_by_user_id BIGINT UNSIGNED NULL,
+    resolved_at         DATETIME        NULL,
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_sync_conflicts_op (op_uuid),
+    KEY idx_sync_conflicts_pending (status, is_urgent, created_at),
+    KEY idx_sync_conflicts_session (table_session_id),
+    CONSTRAINT fk_sync_conflicts_session FOREIGN KEY (table_session_id)    REFERENCES table_sessions (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_sync_conflicts_user    FOREIGN KEY (resolved_by_user_id) REFERENCES users (id)          ON DELETE RESTRICT,
+    CONSTRAINT ck_sync_conflicts_resolved CHECK (
+        status = 'pending'
+     OR (resolved_at IS NOT NULL AND resolved_by_user_id IS NOT NULL AND resolution IS NOT NULL)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 17. SỔ CÁI CHỐNG TRÙNG op_uuid Ở TẦNG ĐỒNG BỘ (Phase 2 Bước 4)
+-- Độc lập với uuid nghiệp vụ trên từng bảng — xem docs/thiet-ke-dong-bo.md
+-- mục 3.3.1. Chỉ ghi thao tác Action đã chạy THÀNH CÔNG (status "applied").
+-- Không phải dữ liệu giao dịch — được phép dọn định kỳ bằng lệnh artisan
+-- `sync:cleanup-applied-ops` (mặc định giữ 7 ngày), khác payments/orders.
+CREATE TABLE sync_applied_ops (
+    op_uuid         CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    op_type         VARCHAR(40)  NOT NULL,
+    device_id       VARCHAR(50)  NOT NULL,
+    result_payload  JSON         NOT NULL COMMENT 'Đủ để dựng lại response applied cũ khi gửi lại',
+    applied_at      DATETIME     NOT NULL,
+    PRIMARY KEY (op_uuid)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 18. KHUYẾN MÃI (Phase 2 Bước 6)
+-- target_id KHÔNG có khoá ngoại — trỏ tới categories.id HOẶC products.id tuỳ
+-- applies_to, một cột không thể có hai khoá ngoại cùng lúc. ApplyPromotion
+-- tự kiểm tra đúng bảng tương ứng, Filament chỉ cho chọn từ đúng danh sách.
+CREATE TABLE promotions (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    code                VARCHAR(30)     NOT NULL COMMENT 'Mã khuyến mãi, thu ngân gõ hoặc chọn: HAPPYHOUR20',
+    name                VARCHAR(100)    NOT NULL COMMENT 'Tên hiển thị: "Giờ vàng bia 17h-19h"',
+
+    type                ENUM('percent','amount','happy_hour') NOT NULL
+                        COMMENT 'percent/happy_hour: value là %. amount: value là số tiền cố định (đồng)',
+    value               BIGINT UNSIGNED NOT NULL COMMENT 'percent/happy_hour: 1-100. amount: số đồng',
+
+    min_order_amount    BIGINT UNSIGNED NULL COMMENT 'Tạm tính tối thiểu của cả lượt khách, NULL = không giới hạn',
+    max_discount_amount BIGINT UNSIGNED NULL COMMENT 'Trần số tiền được giảm, NULL = không trần',
+
+    starts_at           DATETIME        NULL COMMENT 'NULL = không giới hạn ngày bắt đầu',
+    ends_at              DATETIME        NULL COMMENT 'NULL = không giới hạn ngày kết thúc',
+    time_rules          JSON            NULL COMMENT '{"days":[0..6],"from":"17:00","to":"19:00"} — NULL = mọi giờ mọi ngày. Bắt buộc có khi type=happy_hour',
+
+    applies_to          ENUM('all','category','product') NOT NULL DEFAULT 'all',
+    target_id           BIGINT UNSIGNED NULL COMMENT 'id của categories/products khi applies_to khác all — không có FK, xem ghi chú đầu mục',
+
+    max_usage           INT UNSIGNED    NULL COMMENT 'Tổng số lần được dùng, NULL = không giới hạn',
+    used_count          INT UNSIGNED    NOT NULL DEFAULT 0,
+
+    is_active           TINYINT(1)      NOT NULL DEFAULT 1,
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_promotions_code (code),
+    KEY idx_promotions_active_dates (is_active, starts_at, ends_at),
+    CONSTRAINT ck_promotions_value   CHECK (value > 0),
+    CONSTRAINT ck_promotions_percent CHECK (type NOT IN ('percent', 'happy_hour') OR value <= 100),
+    CONSTRAINT ck_promotions_target  CHECK (applies_to = 'all' OR target_id IS NOT NULL),
+    CONSTRAINT ck_promotions_usage   CHECK (max_usage IS NULL OR used_count <= max_usage),
+    CONSTRAINT ck_promotions_dates   CHECK (starts_at IS NULL OR ends_at IS NULL OR starts_at < ends_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- table_sessions.promotion_id (mục 5) chỉ giành được khoá ngoại ở đây.
+ALTER TABLE table_sessions
+    ADD CONSTRAINT fk_table_sessions_promotion FOREIGN KEY (promotion_id) REFERENCES promotions (id) ON DELETE RESTRICT;
+
+-- 19. TỔNG HỢP NGÀY (Phase 2 Bước 8)
+-- Ghi bởi App\Domain\Reporting\Actions\SummarizeDailyReport, chạy lúc đóng ca
+-- (đẩy vào hàng đợi, KHÔNG cùng transaction với CloseShift) hoặc chạy tay lại
+-- bằng lệnh `report:summarize`. Luôn tính lại từ đầu rồi ghi đè theo `date`
+-- (UNIQUE) — không cộng dồn khi chạy lại nhiều lần cho cùng một ngày.
+-- cash_variance_amount là cột DUY NHẤT trong toàn dự án CỐ Ý cho phép ÂM.
+CREATE TABLE daily_summaries (
+    id                     BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    date                   DATE            NOT NULL COMMENT 'Ngày kinh doanh — theo opened_at của từng lượt khách/ca',
+
+    revenue_amount         BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Doanh thu = tiền mặt + chuyển khoản đã thu',
+    cash_amount            BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    transfer_amount        BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    discount_amount        BIGINT UNSIGNED NOT NULL DEFAULT 0,
+
+    table_session_count    INT UNSIGNED    NOT NULL DEFAULT 0,
+    guest_count            INT UNSIGNED    NOT NULL DEFAULT 0,
+
+    cancelled_item_count   INT UNSIGNED    NOT NULL DEFAULT 0,
+    cancelled_item_amount  BIGINT UNSIGNED NOT NULL DEFAULT 0,
+
+    cash_variance_amount   BIGINT          NOT NULL DEFAULT 0 COMMENT 'Âm = thiếu, dương = thừa — CỐ Ý không unsigned',
+
+    created_at             TIMESTAMP       NULL,
+    updated_at             TIMESTAMP       NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_daily_summaries_date (date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20. BÁN HÀNG THEO MÓN, THEO NGÀY (Phase 2 Bước 8)
+-- Cùng vòng đời với daily_summaries (mục 19).
+CREATE TABLE product_sales_daily (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    date                DATE            NOT NULL,
+    product_id          BIGINT UNSIGNED NOT NULL,
+    product_variant_id  BIGINT UNSIGNED NOT NULL,
+
+    quantity_sold       INT UNSIGNED    NOT NULL DEFAULT 0,
+    revenue_amount      BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Thành tiền các dòng món CHƯA HUỶ',
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_product_sales_daily_date_variant (date, product_variant_id),
+    KEY idx_product_sales_daily_date_product (date, product_id),
+    CONSTRAINT fk_product_sales_daily_product FOREIGN KEY (product_id)         REFERENCES products (id)         ON DELETE RESTRICT,
+    CONSTRAINT fk_product_sales_daily_variant FOREIGN KEY (product_variant_id) REFERENCES product_variants (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
 ---
@@ -688,6 +866,13 @@ Ký hiệu người gác: **DB** = database tự chặn · **APP** = code Larave
 | C6 | Đóng ca **bắt buộc** nhập số tiền đếm thực tế. Không cho bỏ trống. | **DB** (`ck_shifts_closed_fields`) |
 | C7 | Mọi khoản thu chi vặt **bắt buộc** có lý do. | **DB** (`NOT NULL`) |
 
+### Về đồng bộ (Phase 2 Bước 4)
+
+| # | Điều phải luôn đúng | Ai gác |
+|---|---|---|
+| S1 | Mỗi thao tác gửi từ máy POS offline có `op_uuid` duy nhất toàn hệ thống trong `sync_conflicts` — gửi lại đúng thao tác đã ghi xung đột không tạo bản ghi chờ thứ hai. | **DB** (`uq_sync_conflicts_op`) |
+| S2 | Xung đột đã xử lý (`resolved`/`dismissed`) bắt buộc có đủ ai, lúc nào, chọn phương án gì — cùng khuôn "không có cục tẩy" với H2. | **DB** (`ck_sync_conflicts_resolved`) |
+
 ### Về thực đơn
 
 | # | Điều phải luôn đúng | Ai gác |
@@ -719,6 +904,8 @@ Nhưng mục lục càng dày thì mỗi lần ghi thêm càng chậm — nên c
 | `users`, `dining_tables`, `products`, `categories` | các khóa `code` / `name` | Không có hai bàn cùng tên, hai món cùng mã. |
 | `product_variants` | `uq_variants_product_name` | Một món không thể có hai biến thể cùng tên "Lon". |
 | `options` | `uq_options_group_name` | Một nhóm tùy chọn không có hai mục "Ít đá". |
+| `sync_conflicts` | `uq_sync_conflicts_op` | Máy POS gửi lại đúng thao tác đã ghi xung đột — không tạo hai bản ghi chờ người quyết. |
+| `sync_applied_ops` | `PRIMARY KEY (op_uuid)` | Máy POS gửi lại đúng thao tác đã áp dụng xong (mạng rớt lúc nhận response) — trả `duplicate` ngay, không gọi lại Action, không tạo hiệu ứng phụ lần hai. |
 
 ### Chỉ mục TĂNG TỐC
 
@@ -860,6 +1047,9 @@ erDiagram
     products ||--o{ order_items : "snapshot tên món"
     product_variants ||--o{ order_items : "snapshot giá"
     options ||--o{ order_item_options : "snapshot tùy chọn"
+
+    table_sessions ||--o{ sync_conflicts : "xung đột liên quan lượt khách nào"
+    users ||--o{ sync_conflicts : "ai xử lý xung đột"
 
     users {
         bigint id PK
@@ -1015,6 +1205,23 @@ erDiagram
         enum status "completed / voided"
         string void_reason
     }
+
+    sync_conflicts {
+        bigint id PK
+        char op_uuid UK "Vân tay của thao tác gốc, gửi lại không tạo bản ghi chờ thứ hai"
+        char batch_uuid "Gói đồng bộ nào sinh ra xung đột này"
+        string device_id "Máy POS nào"
+        string op_type "open_session, place_order..."
+        string conflict_kind "10 loại ở ma trận Bước 4"
+        bool is_urgent "Chặn đường thanh toán"
+        datetime occurred_at "Giờ máy POS khai"
+        datetime received_at "Giờ server nhận"
+        bigint table_session_id FK
+        enum status "pending/resolved/dismissed"
+        string resolution "Phương án đã chọn"
+        bigint resolved_by_user_id FK
+        datetime resolved_at
+    }
 ```
 
 ---
@@ -1039,9 +1246,11 @@ Bảng nào được bảng khác trỏ tới thì phải tạo trước.
 13. order_items            (cần orders, products, product_variants, users)
 14. order_item_options     (cần order_items, options)
 15. payments               (cần table_sessions, shifts, users)
+16. sync_conflicts         (cần table_sessions, users)
+17. sync_applied_ops       (không phụ thuộc bảng nào khác)
 ```
 
-Khi xóa để làm lại thì đi ngược từ 15 về 1.
+Khi xóa để làm lại thì đi ngược từ 17 về 1.
 
 ---
 

@@ -17,6 +17,10 @@ final class TableSessionResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            // Phase 2 Bước 3 mục 4: máy POS cần uuid của MỌI lượt khách (không
+            // chỉ lượt mở lúc offline) để khoá thu tiền offline theo thiết bị —
+            // xem resources/js/lib/queue.js coThuTienOfflineTuMayKhac().
+            'uuid' => $this->uuid,
             'code' => $this->code,
             'status' => $this->status->value,
             'guest_count' => $this->guest_count,
