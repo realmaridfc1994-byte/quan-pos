@@ -5,7 +5,7 @@
 
 ```
 PHASE = 2
-BUOC_DANG_MO = 8
+BUOC_DANG_MO = 9
 ```
 
 **Phase 2 — Chuẩn hoá vận hành. Bước 0 — Kiểm toán định danh.**
@@ -49,4 +49,4 @@ BUOC_DANG_MO = 8
 - [x] Bước 6 — Khuyến mãi
 - [x] Bước 7 — Thanh toán QR
 - [x] Bước 8 — Báo cáo tổng hợp
-- [ ] Bước 9 — Opus review
+- [x] Bước 9 — Opus review
