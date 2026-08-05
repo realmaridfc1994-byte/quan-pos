@@ -640,7 +640,7 @@ CREATE TABLE sync_conflicts (
     device_id           VARCHAR(50)     NOT NULL,
 
     op_type             VARCHAR(40)     NOT NULL COMMENT 'open_session, place_order, record_payment...',
-    conflict_kind       VARCHAR(40)     NOT NULL COMMENT '10 loại ở ma trận docs/thiet-ke-dong-bo.md mục 5',
+    conflict_kind       VARCHAR(40)     NOT NULL COMMENT '11 loại ở ma trận docs/thiet-ke-dong-bo.md mục 5 (dòng 4/5 tách bốn — sửa 05/08)',
     is_urgent           TINYINT(1)      NOT NULL DEFAULT 0 COMMENT 'Chặn đường thanh toán — VD dòng 2: tem đã in, bếp đang nấu, bàn chưa thanh toán được',
 
     occurred_at         DATETIME        NOT NULL COMMENT 'Giờ máy POS khai',
@@ -1212,7 +1212,7 @@ erDiagram
         char batch_uuid "Gói đồng bộ nào sinh ra xung đột này"
         string device_id "Máy POS nào"
         string op_type "open_session, place_order..."
-        string conflict_kind "10 loại ở ma trận Bước 4"
+        string conflict_kind "11 loại ở ma trận Bước 4 (dòng 4/5 tách bốn)"
         bool is_urgent "Chặn đường thanh toán"
         datetime occurred_at "Giờ máy POS khai"
         datetime received_at "Giờ server nhận"

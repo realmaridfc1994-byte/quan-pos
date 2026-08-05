@@ -2,7 +2,11 @@
 
 declare(strict_types=1);
 
+use App\Domain\Ordering\Enums\OrderStatus;
+use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\DiningTable;
+use App\Domain\Ordering\Models\Order;
+use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Ordering\Models\TableSessionTable;
 use App\Domain\Staffing\Models\Shift;
@@ -84,6 +88,54 @@ it('Bước 2: hai người mở bàn khác nhau gần như cùng lúc — cả 
 
     // Không bản ghi nào còn giữ mã tạm (uuid cắt còn 30 ký tự) sau khi
     // transaction xong.
+    foreach (TableSession::query()->pluck('code') as $ma) {
+        expect($ma)->toMatch('/^PH-'.$homNay.'-\d+$/');
+    }
+});
+
+it('Bước 9 (kiểm toán): hai người tách bàn gần như cùng lúc — cả hai thành công, mã lượt khách mới KHÁC NHAU, đúng định dạng', function () {
+    $ca = Shift::factory()->open()->create();
+
+    $banChinh1 = DiningTable::factory()->create();
+    $banGhep1 = DiningTable::factory()->create();
+    $luot1 = TableSession::factory()->create(['shift_id' => $ca->id, 'status' => TableSessionStatus::Open]);
+    TableSessionTable::factory()->for($luot1)->create(['dining_table_id' => $banChinh1->id, 'is_primary' => true]);
+    TableSessionTable::factory()->for($luot1)->notPrimary()->create(['dining_table_id' => $banGhep1->id]);
+    $don1 = Order::factory()->for($luot1, 'tableSession')->kitchen()->create(['status' => OrderStatus::Sent]);
+    $dongMon1 = OrderItem::factory()->for($don1)->create(['unit_price' => 25_000, 'options_amount' => 0, 'quantity' => 1]);
+
+    $banChinh2 = DiningTable::factory()->create();
+    $banGhep2 = DiningTable::factory()->create();
+    $luot2 = TableSession::factory()->create(['shift_id' => $ca->id, 'status' => TableSessionStatus::Open]);
+    TableSessionTable::factory()->for($luot2)->create(['dining_table_id' => $banChinh2->id, 'is_primary' => true]);
+    TableSessionTable::factory()->for($luot2)->notPrimary()->create(['dining_table_id' => $banGhep2->id]);
+    $don2 = Order::factory()->for($luot2, 'tableSession')->kitchen()->create(['status' => OrderStatus::Sent]);
+    $dongMon2 = OrderItem::factory()->for($don2)->create(['unit_price' => 25_000, 'options_amount' => 0, 'quantity' => 1]);
+
+    $anhNam = User::factory()->staff()->create();
+    $chiLan = User::factory()->staff()->create();
+
+    $ketQuaNam = test()->postJson(
+        "/api/v1/table-sessions/{$luot1->id}/split",
+        ['uuid' => (string) Str::uuid(), 'order_item_ids' => [$dongMon1->id], 'dining_table_ids' => [$banGhep1->id], 'guest_count' => 2],
+        array_merge(authHeaderFor($anhNam), ['Idempotency-Key' => (string) Str::uuid()])
+    )->assertCreated();
+
+    $ketQuaLan = test()->postJson(
+        "/api/v1/table-sessions/{$luot2->id}/split",
+        ['uuid' => (string) Str::uuid(), 'order_item_ids' => [$dongMon2->id], 'dining_table_ids' => [$banGhep2->id], 'guest_count' => 2],
+        array_merge(authHeaderFor($chiLan), ['Idempotency-Key' => (string) Str::uuid()])
+    )->assertCreated();
+
+    $maNam = $ketQuaNam->json('data.new.code');
+    $maLan = $ketQuaLan->json('data.new.code');
+    $homNay = now()->format('Ymd');
+
+    expect($maNam)->not->toBe($maLan)
+        ->and($maNam)->toMatch('/^PH-'.$homNay.'-\d+$/')
+        ->and($maLan)->toMatch('/^PH-'.$homNay.'-\d+$/');
+
+    // Không lượt khách nào còn giữ mã tạm (uuid cắt còn 30 ký tự) sau khi tách.
     foreach (TableSession::query()->pluck('code') as $ma) {
         expect($ma)->toMatch('/^PH-'.$homNay.'-\d+$/');
     }

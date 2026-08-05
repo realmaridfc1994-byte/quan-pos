@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\ApprovalPinRequiredException;
 use App\Exceptions\DomainException;
 use App\Exceptions\IdempotencyConflictException;
 use App\Exceptions\IdempotencyKeyRequiredException;
@@ -41,6 +42,7 @@ return Application::configure(basePath: dirname(__DIR__))
             $mapped = match (true) {
                 $e instanceof ValidationException => [422, 'VALIDATION_ERROR', 'Dữ liệu gửi lên không hợp lệ.', $e->errors()],
                 $e instanceof DomainException => [422, 'DOMAIN_ERROR', $e->getMessage(), null],
+                $e instanceof ApprovalPinRequiredException => [422, 'APPROVAL_PIN_REQUIRED', $e->getMessage(), null],
                 $e instanceof IdempotencyKeyRequiredException => [400, 'IDEMPOTENCY_KEY_REQUIRED', $e->getMessage(), null],
                 $e instanceof IdempotencyConflictException => [409, 'IDEMPOTENCY_CONFLICT', $e->getMessage(), null],
                 $e instanceof IdempotencyPayloadMismatchException => [422, 'IDEMPOTENCY_PAYLOAD_MISMATCH', $e->getMessage(), null],

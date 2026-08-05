@@ -134,24 +134,26 @@ Món hàng nào không rõ thuộc nhóm nào thì hỏi, đừng tự đoán.
 8. **Mọi phép tính tiền đi qua `App\Support\Money`.** Không `+`, `-`, `*` trực tiếp trên biến tiền trong Action hay Controller. Money tự chặn kết quả âm.
 9. **Mọi thay đổi dữ liệu liên quan tiền phải nằm trong `DB::transaction()`**: thu tiền, huỷ phiếu thu, giảm giá, đóng lượt khách, đóng ca, tính lại tổng tiền. Trong transaction phải `lockForUpdate()` dòng `table_sessions` hoặc `shifts` liên quan trước khi đọc để tính.
 10. **Số tiền trên hoá đơn được chốt, không tính lại về sau.** `order_items` luôn lưu bản sao `product_name`, `variant_name`, `unit_price`. Sửa giá trong thực đơn **không** được làm đổi một chữ nào trên hoá đơn cũ.
-11. **Mọi Action đụng tiền khoá theo đúng một thứ tự chung: `Payment` → `TableSession` → `Shift` → `DiningTable`.** (Sửa ngày 02/08 sau kiểm toán Phase 2 Bước 0/2: luật cũ ghi `Shift → TableSession → Payment` là SAI — code đang chạy nhất quán theo thứ tự ngược lại từ trước giờ và không có vòng kẹt nào; đổi luật cho khớp thực tế, không sửa code.) Khoá ngược thứ tự nhau giữa hai Action là kẹt chéo (deadlock) — MySQL tự phát hiện và huỷ một bên, nhưng thu ngân nhận lỗi khó hiểu. `DiningTable` luôn khoá SAU CÙNG. Cần khoá nhiều dòng cùng loại (nhiều `Shift`, nhiều `DiningTable`...) thì khoá theo `id` tăng dần, giống quy tắc khoá nhiều bàn ở luật 17.
+11. **Mọi Action đụng tiền khoá theo đúng một thứ tự chung: `SyncConflict` → `Promotion` → `Payment` → `TableSession` → `Shift` → `DiningTable`.** (Sửa ngày 02/08 sau kiểm toán Phase 2 Bước 0/2: luật cũ ghi `Shift → TableSession → Payment` là SAI — code đang chạy nhất quán theo thứ tự ngược lại từ trước giờ và không có vòng kẹt nào; đổi luật cho khớp thực tế, không sửa code. Bổ sung 04/08: thêm `SyncConflict` và `Promotion` vào đầu chuỗi. Đặt ở đầu vì `ResolveSyncConflict` khoá `SyncConflict` rồi mới chạm bảng nghiệp vụ, và `ApplyPromotion` khoá `Promotion` rồi mới tới `TableSession` — sửa luật cho khớp code đang chạy đúng, không sửa code.) Khoá ngược thứ tự nhau giữa hai Action là kẹt chéo (deadlock) — MySQL tự phát hiện và huỷ một bên, nhưng thu ngân nhận lỗi khó hiểu. `DiningTable` luôn khoá SAU CÙNG. Cần khoá nhiều dòng cùng loại (nhiều `Shift`, nhiều `DiningTable`...) thì khoá theo `id` tăng dần, giống quy tắc khoá nhiều bàn ở luật 18. **Phase sau thêm loại đối tượng mới cần khoá thì phải bổ sung vào chuỗi này TRƯỚC khi viết Action đầu tiên khoá nó.** Loại nằm ngoài luật là loại không ai chứng minh được thứ tự đúng.
+
+12. **Mọi bước duyệt PIN phải hoàn tất TRƯỚC khi mở `DB::transaction`.** Không bao giờ đòi PIN giữa một giao dịch đang mở — giao dịch treo sẽ giữ khoá trên `TableSession` và `Shift`, và trong lúc chờ người nhập PIN thì không ai thu tiền được bàn nào thuộc ca đó. (Thêm 05/08 sau kiểm toán Phase 2 Bước 9: `ResolveSyncConflict` từng truyền `approverUserId`/`approverPin` là `null` thẳng vào `CalculateBillData` cho các nhánh có thể vượt ngưỡng, khiến lỗi thiếu PIN nổ ra giữa transaction đã mở — sửa thành xác thực PIN ở một bước riêng, đọc không khoá, chạy trước `DB::transaction`; xem `ResolveSyncConflict::duyetPinTruocGiaoDich()`.)
 
 ### Dữ liệu
 
-12. **Không xoá cứng dữ liệu giao dịch.** Với `table_sessions`, `table_session_tables`, `orders`, `order_items`, `order_item_options`, `payments`, `shifts`, `cash_movements`: không `delete()`, không `truncate()`, không `forceDelete()`. Huỷ = đổi trạng thái + ghi **ai huỷ, lúc nào, vì sao**. Thiếu một trong ba thì database từ chối.
-13. **Danh mục không xoá, chỉ tắt cờ `is_active`**: nhân viên nghỉ việc, bàn dẹp đi, món ngưng bán, biến thể bỏ.
-14. **Tên bảng: số nhiều, snake_case** (`table_sessions`, `order_items`). **Tên cột: snake_case** (`opened_by_user_id`, `total_amount`). Khoá ngoại: `<bảng_số_ít>_id`. Tiền: hậu tố `_amount`. Thời điểm: hậu tố `_at`. Cờ: tiền tố `is_`. Người thực hiện: `<động_từ>_by_user_id`.
-15. **Mọi khoá ngoại là `ON DELETE RESTRICT`.** Không `CASCADE`, không `SET NULL`.
-16. **Trạng thái luôn là PHP Enum backed by string**, cast trong Model. Không so sánh chuỗi trần `=== 'open'` rải rác trong code.
-17. **Giữ chỗ nhiều bàn thì luôn khoá theo `dining_table_id` tăng dần** — đây là quy tắc chống kẹt chéo (deadlock) đã chốt ở `docs/schema.md` Phần 6. Không có ngoại lệ.
+13. **Không xoá cứng dữ liệu giao dịch.** Với `table_sessions`, `table_session_tables`, `orders`, `order_items`, `order_item_options`, `payments`, `shifts`, `cash_movements`: không `delete()`, không `truncate()`, không `forceDelete()`. Huỷ = đổi trạng thái + ghi **ai huỷ, lúc nào, vì sao**. Thiếu một trong ba thì database từ chối.
+14. **Danh mục không xoá, chỉ tắt cờ `is_active`**: nhân viên nghỉ việc, bàn dẹp đi, món ngưng bán, biến thể bỏ.
+15. **Tên bảng: số nhiều, snake_case** (`table_sessions`, `order_items`). **Tên cột: snake_case** (`opened_by_user_id`, `total_amount`). Khoá ngoại: `<bảng_số_ít>_id`. Tiền: hậu tố `_amount`. Thời điểm: hậu tố `_at`. Cờ: tiền tố `is_`. Người thực hiện: `<động_từ>_by_user_id`.
+16. **Mọi khoá ngoại là `ON DELETE RESTRICT`.** Không `CASCADE`, không `SET NULL`.
+17. **Trạng thái luôn là PHP Enum backed by string**, cast trong Model. Không so sánh chuỗi trần `=== 'open'` rải rác trong code.
+18. **Giữ chỗ nhiều bàn thì luôn khoá theo `dining_table_id` tăng dần** — đây là quy tắc chống kẹt chéo (deadlock) đã chốt ở `docs/schema.md` Phần 6. Không có ngoại lệ.
 
 ### Code và test
 
-18. **Mọi Action mới phải có feature test.** Test viết bằng Pest, tiếng Việt trong phần mô tả, đặt trong `tests/Feature/<Nhóm>/`.
-19. **Test phải phủ cả đường thất bại**, không chỉ đường thành công: bàn đã có khách, ca đã đóng, thu thiếu tiền, huỷ mà không ghi lý do.
-20. **Không viết comment giải thích cú pháp PHP.** Comment chỉ để giải thích *quyết định nghiệp vụ* và viết bằng tiếng Việt.
-21. **Chạy `./vendor/bin/pint` trước khi coi một việc là xong.**
-22. **Factory KHÔNG sinh giá trị ngẫu nhiên cho cột UNIQUE khi không gian giá trị đủ nhỏ để trùng trong một lần chạy test — mã bàn, mã món, số điện thoại, tên nhóm. Dùng bộ đếm tăng dần cho những cột đó. NGOẠI LỆ: cột uuid giữ `Str::uuid()`. Không gian giá trị của UUID lớn tới mức trùng nhau không phải rủi ro thực tế, và đổi sang bộ đếm sẽ phá định dạng UUID mà tầng sản xuất có kiểm tra — làm test bớt giống luồng thật. Test đỏ ngẫu nhiên nguy hiểm hơn không có test, vì nó dạy người đọc bỏ qua màu đỏ.**
+19. **Mọi Action mới phải có feature test.** Test viết bằng Pest, tiếng Việt trong phần mô tả, đặt trong `tests/Feature/<Nhóm>/`.
+20. **Test phải phủ cả đường thất bại**, không chỉ đường thành công: bàn đã có khách, ca đã đóng, thu thiếu tiền, huỷ mà không ghi lý do.
+21. **Không viết comment giải thích cú pháp PHP.** Comment chỉ để giải thích *quyết định nghiệp vụ* và viết bằng tiếng Việt.
+22. **Chạy `./vendor/bin/pint` trước khi coi một việc là xong.**
+23. **Factory KHÔNG sinh giá trị ngẫu nhiên cho cột UNIQUE khi không gian giá trị đủ nhỏ để trùng trong một lần chạy test — mã bàn, mã món, số điện thoại, tên nhóm. Dùng bộ đếm tăng dần cho những cột đó. NGOẠI LỆ: cột uuid giữ `Str::uuid()`. Không gian giá trị của UUID lớn tới mức trùng nhau không phải rủi ro thực tế, và đổi sang bộ đếm sẽ phá định dạng UUID mà tầng sản xuất có kiểm tra — làm test bớt giống luồng thật. Test đỏ ngẫu nhiên nguy hiểm hơn không có test, vì nó dạy người đọc bỏ qua màu đỏ.**
 
 ---
 

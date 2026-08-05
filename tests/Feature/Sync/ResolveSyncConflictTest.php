@@ -41,6 +41,7 @@ use App\Domain\Sync\DTO\ResolveSyncConflictData;
 use App\Domain\Sync\Enums\ConflictKind;
 use App\Domain\Sync\Enums\ConflictStatus;
 use App\Domain\Sync\Models\SyncConflict;
+use App\Exceptions\ApprovalPinRequiredException;
 use App\Exceptions\DomainException;
 use Illuminate\Support\Str;
 
@@ -172,6 +173,95 @@ it('hai máy cùng mở bàn — "Tách" dựng lại đúng lượt khách thua
         ->and(Order::query()->where('uuid', $donUuid)->where('table_session_id', $luotMoi->id)->exists())->toBeTrue();
 });
 
+// ── PIN duyệt trước giao dịch khi cụm thao tác chứa huỷ món ĐÃ "served" ──────
+// (sửa 05/08 sau kiểm toán: apDungCancelOrderItem() từng luôn truyền
+// approverUserId/approverPin = null, khiến CancelOrderItem tự đòi PIN GIỮA
+// transaction đã mở khi dòng món bị huỷ trong cụm đã ở trạng thái "served")
+
+it('hai máy cùng mở bàn — cụm có huỷ món đã "served" mà KHÔNG có PIN thì bị chặn, không mở giao dịch nào', function () {
+    $banTranhChap = DiningTable::factory()->create();
+    $luotThang = TableSession::factory()->create(['shift_id' => $this->ca->id]);
+    TableSessionTable::factory()->for($luotThang)->create(['dining_table_id' => $banTranhChap->id]);
+
+    $donDaCo = Order::factory()->for($luotThang, 'tableSession')->create();
+    $dongMonDaServed = OrderItem::factory()->for($donDaCo, 'order')->served()->create(['quantity' => 2]);
+
+    $luotThuaUuid = (string) Str::uuid();
+
+    $xungDot = taoXungDot(
+        ConflictKind::HaiMayMoBan,
+        goc: ['type' => 'open_session', 'payload' => [
+            'uuid' => $luotThuaUuid,
+            'dining_table_ids' => [$banTranhChap->id],
+            'primary_dining_table_id' => $banTranhChap->id,
+            'guest_count' => 2,
+        ]],
+        cum: [[
+            'type' => 'cancel_order_item',
+            'payload' => [
+                'order_item_uuid' => $dongMonDaServed->uuid,
+                'quantity' => 2,
+                'reason' => 'Khách trả lại, gọi nhầm ở máy thua',
+            ],
+        ]],
+        urgent: true,
+    );
+
+    expect(fn () => app(ResolveSyncConflict::class)->handle(new ResolveSyncConflictData(
+        conflictId: $xungDot->id,
+        dismiss: false,
+        resolution: 'gop',
+        note: 'Gộp vào lượt máy 1, kèm huỷ món đã phục vụ.',
+        resolvedByUserId: $this->nguoiQuyet->id,
+    )))->toThrow(ApprovalPinRequiredException::class);
+
+    expect($xungDot->refresh()->status)->toBe(ConflictStatus::Pending)
+        ->and($dongMonDaServed->refresh()->status->value)->toBe('served');
+});
+
+it('hai máy cùng mở bàn — cụm có huỷ món đã "served", CÓ PIN đúng thì thành công', function () {
+    $banTranhChap = DiningTable::factory()->create();
+    $luotThang = TableSession::factory()->create(['shift_id' => $this->ca->id]);
+    TableSessionTable::factory()->for($luotThang)->create(['dining_table_id' => $banTranhChap->id]);
+
+    $donDaCo = Order::factory()->for($luotThang, 'tableSession')->create();
+    $dongMonDaServed = OrderItem::factory()->for($donDaCo, 'order')->served()->create(['quantity' => 2]);
+
+    $luotThuaUuid = (string) Str::uuid();
+
+    $xungDot = taoXungDot(
+        ConflictKind::HaiMayMoBan,
+        goc: ['type' => 'open_session', 'payload' => [
+            'uuid' => $luotThuaUuid,
+            'dining_table_ids' => [$banTranhChap->id],
+            'primary_dining_table_id' => $banTranhChap->id,
+            'guest_count' => 2,
+        ]],
+        cum: [[
+            'type' => 'cancel_order_item',
+            'payload' => [
+                'order_item_uuid' => $dongMonDaServed->uuid,
+                'quantity' => 2,
+                'reason' => 'Khách trả lại, gọi nhầm ở máy thua',
+            ],
+        ]],
+        urgent: true,
+    );
+
+    app(ResolveSyncConflict::class)->handle(new ResolveSyncConflictData(
+        conflictId: $xungDot->id,
+        dismiss: false,
+        resolution: 'gop',
+        note: 'Gộp vào lượt máy 1, chủ quán duyệt huỷ món đã phục vụ.',
+        resolvedByUserId: $this->nguoiQuyet->id,
+        approverUserId: $this->nguoiQuyet->id,
+        approverPin: '1234',
+    ));
+
+    expect($xungDot->refresh()->status)->toBe(ConflictStatus::Resolved)
+        ->and($dongMonDaServed->refresh()->status->value)->toBe('cancelled');
+});
+
 // ── dòng 4: hai máy cùng thu tiền ──────────────────────────────────────────
 
 it('hai máy cùng thu tiền — "Két không thừa" không tạo dữ liệu gì', function () {
@@ -241,6 +331,99 @@ it('hai máy cùng thu tiền — "Két có thừa" ghi một khoản thu và m�
         ->and(Payment::query()->count())->toBe(0)
         ->and($khoanThu->reason)->toBe("Thu trùng bàn {$ban->code} - xung đột #{$xungDot->id} - khách trả hai lần thật")
         ->and($khoanChi->reason)->toBe("Hoàn lại bàn {$ban->code} - xung đột #{$xungDot->id}");
+});
+
+// ── dòng 4b: thu một phần ở hai nơi, cộng lại vượt (sửa 05/08) ──────────────
+
+it('thu một phần vượt — "Bỏ phiếu này" không tạo dữ liệu gì', function () {
+    $session = TableSession::factory()->withTable()->create([
+        'shift_id' => $this->ca->id,
+        'status' => TableSessionStatus::Billing,
+        'subtotal_amount' => 500_000,
+        'total_amount' => 500_000,
+        'paid_amount' => 200_000,
+    ]);
+    Payment::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'table_session_id' => $session->id,
+        'shift_id' => $this->ca->id,
+        'method' => 'cash',
+        'amount' => 200_000,
+        'tendered_amount' => 200_000,
+        'change_amount' => 0,
+        'status' => 'completed',
+        'received_by_user_id' => $this->nguoiQuyet->id,
+        'paid_at' => now(),
+    ]);
+
+    $xungDot = taoXungDot(
+        ConflictKind::ThuMotPhanVuot,
+        goc: ['type' => 'record_payment', 'payload' => [
+            'uuid' => (string) Str::uuid(), 'table_session_uuid' => $session->uuid,
+            'amount' => 400_000, 'tendered_amount' => 400_000,
+        ]],
+        tableSessionId: $session->id,
+    );
+
+    app(ResolveSyncConflict::class)->handle(new ResolveSyncConflictData(
+        conflictId: $xungDot->id,
+        dismiss: false,
+        resolution: 'bo_phieu',
+        note: 'Không chắc khách đưa 400.000 hay chỉ là ghi nhầm — bỏ phiếu này.',
+        resolvedByUserId: $this->nguoiQuyet->id,
+        approverUserId: $this->nguoiQuyet->id,
+        approverPin: '1234',
+    ));
+
+    expect(Payment::query()->where('table_session_id', $session->id)->count())->toBe(1)
+        ->and($session->refresh()->paid_amount)->toBe(200_000);
+});
+
+it('thu một phần vượt — "Ghi nhận đúng phần còn thiếu" tạo phiếu thu đúng phần còn lại, hoàn phần thừa', function () {
+    $session = TableSession::factory()->withTable()->create([
+        'shift_id' => $this->ca->id,
+        'status' => TableSessionStatus::Billing,
+        'subtotal_amount' => 500_000,
+        'total_amount' => 500_000,
+        'paid_amount' => 200_000,
+    ]);
+    Payment::query()->create([
+        'uuid' => (string) Str::uuid(),
+        'table_session_id' => $session->id,
+        'shift_id' => $this->ca->id,
+        'method' => 'cash',
+        'amount' => 200_000,
+        'tendered_amount' => 200_000,
+        'change_amount' => 0,
+        'status' => 'completed',
+        'received_by_user_id' => $this->nguoiQuyet->id,
+        'paid_at' => now(),
+    ]);
+    $uuidPhieuThu = (string) Str::uuid();
+
+    $xungDot = taoXungDot(
+        ConflictKind::ThuMotPhanVuot,
+        goc: ['type' => 'record_payment', 'payload' => [
+            'uuid' => $uuidPhieuThu, 'table_session_uuid' => $session->uuid,
+            'amount' => 400_000, 'tendered_amount' => 400_000,
+        ]],
+        tableSessionId: $session->id,
+    );
+
+    app(ResolveSyncConflict::class)->handle(new ResolveSyncConflictData(
+        conflictId: $xungDot->id,
+        dismiss: false,
+        resolution: 'ghi_nhan_hoan_phan_thua',
+        note: 'Khách đưa 400.000 thật — ghi đúng phần còn thiếu 300.000, hoàn 100.000.',
+        resolvedByUserId: $this->nguoiQuyet->id,
+        approverUserId: $this->nguoiQuyet->id,
+        approverPin: '1234',
+    ));
+
+    $phieuThu = Payment::query()->where('uuid', $uuidPhieuThu)->sole();
+    expect($phieuThu->amount)->toBe(300_000)
+        ->and($phieuThu->change_amount)->toBe(100_000)
+        ->and($session->refresh()->paid_amount)->toBe(500_000);
 });
 
 // ── dòng 5: thu offline, giảm giá online ───────────────────────────────────
@@ -324,6 +507,77 @@ it('thu offline vượt tổng sau giảm giá — "Bỏ giảm giá, thu đủ"
     $phieuThu = Payment::query()->where('uuid', $uuidPhieuThu)->sole();
     expect($phieuThu->amount)->toBe(500_000)
         ->and($phieuThu->change_amount)->toBe(0);
+});
+
+// ── dòng 5b: thu offline, tổng đổi vì lý do khác — thường là huỷ món (sửa 05/08) ──
+
+it('thu vượt vì tổng đổi lý do khác — "Bỏ phiếu này" không tạo dữ liệu gì', function () {
+    $session = TableSession::factory()->withTable()->create([
+        'shift_id' => $this->ca->id,
+        'status' => TableSessionStatus::Billing,
+        'subtotal_amount' => 280_000,
+        'discount_amount' => 0,
+        'total_amount' => 280_000,
+        'paid_amount' => 0,
+    ]);
+
+    $xungDot = taoXungDot(
+        ConflictKind::ThuVuotTongDoiKhac,
+        goc: ['type' => 'record_payment', 'payload' => [
+            'uuid' => (string) Str::uuid(), 'table_session_uuid' => $session->uuid,
+            'amount' => 380_000, 'tendered_amount' => 380_000,
+        ]],
+        tableSessionId: $session->id,
+    );
+
+    app(ResolveSyncConflict::class)->handle(new ResolveSyncConflictData(
+        conflictId: $xungDot->id,
+        dismiss: false,
+        resolution: 'bo_phieu',
+        note: 'Không chắc khách đưa 380.000 — bỏ phiếu này.',
+        resolvedByUserId: $this->nguoiQuyet->id,
+        approverUserId: $this->nguoiQuyet->id,
+        approverPin: '1234',
+    ));
+
+    expect(Payment::query()->where('table_session_id', $session->id)->count())->toBe(0)
+        ->and($session->refresh()->paid_amount)->toBe(0);
+});
+
+it('thu vượt vì tổng đổi lý do khác — "Thu đúng tổng hiện tại" tạo phiếu thu đúng tổng, hoàn phần thừa', function () {
+    $session = TableSession::factory()->withTable()->create([
+        'shift_id' => $this->ca->id,
+        'status' => TableSessionStatus::Billing,
+        'subtotal_amount' => 280_000,
+        'discount_amount' => 0,
+        'total_amount' => 280_000,
+        'paid_amount' => 0,
+    ]);
+    $uuidPhieuThu = (string) Str::uuid();
+
+    $xungDot = taoXungDot(
+        ConflictKind::ThuVuotTongDoiKhac,
+        goc: ['type' => 'record_payment', 'payload' => [
+            'uuid' => $uuidPhieuThu, 'table_session_uuid' => $session->uuid,
+            'amount' => 380_000, 'tendered_amount' => 380_000,
+        ]],
+        tableSessionId: $session->id,
+    );
+
+    app(ResolveSyncConflict::class)->handle(new ResolveSyncConflictData(
+        conflictId: $xungDot->id,
+        dismiss: false,
+        resolution: 'thu_du_hoan_phan_thua',
+        note: 'Khách đưa 380.000 thật — món đã huỷ trước đó, thu đúng 280.000, hoàn 100.000.',
+        resolvedByUserId: $this->nguoiQuyet->id,
+        approverUserId: $this->nguoiQuyet->id,
+        approverPin: '1234',
+    ));
+
+    $phieuThu = Payment::query()->where('uuid', $uuidPhieuThu)->sole();
+    expect($phieuThu->amount)->toBe(280_000)
+        ->and($phieuThu->change_amount)->toBe(100_000)
+        ->and($session->refresh()->paid_amount)->toBe(280_000);
 });
 
 // ── dòng 6/9: gọi món vào lượt đã đóng / đã huỷ ────────────────────────────
@@ -500,6 +754,152 @@ it('giá món đổi — "Giảm giá bù" giảm đúng phần server thu nhi�
     $session->refresh();
     // (27.000 - 25.000) * 3 = 6.000
     expect($session->discount_amount)->toBe(6_000);
+});
+
+// ── PIN duyệt trước giao dịch cho khoản "giảm giá bù" (sửa 05/08 sau kiểm toán) ──
+
+it('giá món đổi — thu ngân giảm bù trong ngưỡng 20% thì không cần PIN', function () {
+    $thungan = User::factory()->cashier()->create();
+    $session = TableSession::factory()->withTable()->create(['shift_id' => $this->ca->id]);
+    $don = Order::factory()->for($session, 'tableSession')->create();
+    // Chênh lệch 1.000 trên tạm tính 26.000 ≈ 4% — trong ngưỡng 20% của thu ngân.
+    $dongMon = OrderItem::factory()->for($don, 'order')->create(['unit_price' => 26_000, 'quantity' => 1]);
+
+    $xungDot = taoXungDot(
+        ConflictKind::GiaLech,
+        goc: ['type' => 'place_order', 'payload' => [
+            'uuid' => $don->uuid,
+            'items' => [['uuid' => $dongMon->uuid, 'client_unit_price' => 25_000]],
+        ]],
+        tableSessionId: $session->id,
+    );
+
+    app(ResolveSyncConflict::class)->handle(new ResolveSyncConflictData(
+        conflictId: $xungDot->id,
+        dismiss: false,
+        resolution: 'giam_gia_bu',
+        note: 'Chênh lệch nhỏ, giảm bù trong thẩm quyền.',
+        resolvedByUserId: $thungan->id,
+    ));
+
+    $session->refresh();
+    expect($session->discount_amount)->toBe(1_000)
+        ->and($xungDot->refresh()->status)->toBe(ConflictStatus::Resolved);
+});
+
+it('giá món đổi — thu ngân giảm bù vượt 20% mà KHÔNG có PIN thì bị chặn, không mở giao dịch nào', function () {
+    $thungan = User::factory()->cashier()->create();
+    $session = TableSession::factory()->withTable()->create(['shift_id' => $this->ca->id]);
+    $don = Order::factory()->for($session, 'tableSession')->create();
+    // Chênh lệch 20.000 trên tạm tính 30.000 ≈ 67% — vượt xa ngưỡng 20% của thu ngân.
+    $dongMon = OrderItem::factory()->for($don, 'order')->create(['unit_price' => 30_000, 'quantity' => 1]);
+
+    $xungDot = taoXungDot(
+        ConflictKind::GiaLech,
+        goc: ['type' => 'place_order', 'payload' => [
+            'uuid' => $don->uuid,
+            'items' => [['uuid' => $dongMon->uuid, 'client_unit_price' => 10_000]],
+        ]],
+        tableSessionId: $session->id,
+    );
+
+    expect(fn () => app(ResolveSyncConflict::class)->handle(new ResolveSyncConflictData(
+        conflictId: $xungDot->id,
+        dismiss: false,
+        resolution: 'giam_gia_bu',
+        note: 'Chênh lệch lớn, cần duyệt.',
+        resolvedByUserId: $thungan->id,
+    )))->toThrow(ApprovalPinRequiredException::class);
+
+    // Không mở giao dịch nào: xung đột vẫn "pending", chưa đổi discount_amount.
+    expect($xungDot->refresh()->status)->toBe(ConflictStatus::Pending)
+        ->and($session->refresh()->discount_amount)->toBe(0);
+});
+
+it('giá món đổi — cùng trường hợp vượt 20%, có PIN chủ quán đúng thì thành công', function () {
+    $thungan = User::factory()->cashier()->create();
+    $session = TableSession::factory()->withTable()->create(['shift_id' => $this->ca->id]);
+    $don = Order::factory()->for($session, 'tableSession')->create();
+    $dongMon = OrderItem::factory()->for($don, 'order')->create(['unit_price' => 30_000, 'quantity' => 1]);
+
+    $xungDot = taoXungDot(
+        ConflictKind::GiaLech,
+        goc: ['type' => 'place_order', 'payload' => [
+            'uuid' => $don->uuid,
+            'items' => [['uuid' => $dongMon->uuid, 'client_unit_price' => 10_000]],
+        ]],
+        tableSessionId: $session->id,
+    );
+
+    app(ResolveSyncConflict::class)->handle(new ResolveSyncConflictData(
+        conflictId: $xungDot->id,
+        dismiss: false,
+        resolution: 'giam_gia_bu',
+        note: 'Chênh lệch lớn, chủ quán đã duyệt PIN.',
+        resolvedByUserId: $thungan->id,
+        approverUserId: $this->nguoiQuyet->id,
+        approverPin: '1234',
+    ));
+
+    $session->refresh();
+    expect($session->discount_amount)->toBe(20_000)
+        ->and($xungDot->refresh()->status)->toBe(ConflictStatus::Resolved);
+});
+
+it('giá món đổi — vượt 20%, PIN sai thì bị chặn', function () {
+    $thungan = User::factory()->cashier()->create();
+    $session = TableSession::factory()->withTable()->create(['shift_id' => $this->ca->id]);
+    $don = Order::factory()->for($session, 'tableSession')->create();
+    $dongMon = OrderItem::factory()->for($don, 'order')->create(['unit_price' => 30_000, 'quantity' => 1]);
+
+    $xungDot = taoXungDot(
+        ConflictKind::GiaLech,
+        goc: ['type' => 'place_order', 'payload' => [
+            'uuid' => $don->uuid,
+            'items' => [['uuid' => $dongMon->uuid, 'client_unit_price' => 10_000]],
+        ]],
+        tableSessionId: $session->id,
+    );
+
+    expect(fn () => app(ResolveSyncConflict::class)->handle(new ResolveSyncConflictData(
+        conflictId: $xungDot->id,
+        dismiss: false,
+        resolution: 'giam_gia_bu',
+        note: 'Chênh lệch lớn, PIN sai.',
+        resolvedByUserId: $thungan->id,
+        approverUserId: $this->nguoiQuyet->id,
+        approverPin: '0000',
+    )))->toThrow(ApprovalPinRequiredException::class);
+
+    expect($xungDot->refresh()->status)->toBe(ConflictStatus::Pending)
+        ->and($session->refresh()->discount_amount)->toBe(0);
+});
+
+it('giá món đổi — chủ quán tự xử lý giảm bù bất kỳ mức nào, không cần PIN', function () {
+    $session = TableSession::factory()->withTable()->create(['shift_id' => $this->ca->id]);
+    $don = Order::factory()->for($session, 'tableSession')->create();
+    $dongMon = OrderItem::factory()->for($don, 'order')->create(['unit_price' => 30_000, 'quantity' => 1]);
+
+    $xungDot = taoXungDot(
+        ConflictKind::GiaLech,
+        goc: ['type' => 'place_order', 'payload' => [
+            'uuid' => $don->uuid,
+            'items' => [['uuid' => $dongMon->uuid, 'client_unit_price' => 10_000]],
+        ]],
+        tableSessionId: $session->id,
+    );
+
+    app(ResolveSyncConflict::class)->handle(new ResolveSyncConflictData(
+        conflictId: $xungDot->id,
+        dismiss: false,
+        resolution: 'giam_gia_bu',
+        note: 'Chủ quán tự xử lý, không cần PIN.',
+        resolvedByUserId: $this->nguoiQuyet->id,
+    ));
+
+    $session->refresh();
+    expect($session->discount_amount)->toBe(20_000)
+        ->and($xungDot->refresh()->status)->toBe(ConflictStatus::Resolved);
 });
 
 // ── dòng 10: thiếu thao tác gốc ──────────────────────────────────────────────

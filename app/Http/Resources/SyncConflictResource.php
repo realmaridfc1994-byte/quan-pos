@@ -24,7 +24,9 @@ final class SyncConflictResource extends JsonResource
             // Bước 5, mục 2 của yêu cầu 04/08: xung đột dính tiền phải duyệt
             // bằng PIN — máy POS cần biết trước để hỏi PIN ngay trong modal,
             // không để bị 422 rồi mới hỏi lại.
-            'requires_pin' => in_array($this->conflict_kind, ['thu_tien_trung', 'thu_vuot_giam_gia'], true),
+            'requires_pin' => in_array($this->conflict_kind, [
+                'thu_tien_trung', 'thu_mot_phan_vuot', 'thu_vuot_giam_gia', 'thu_vuot_tong_doi_khac',
+            ], true),
             'occurred_at' => $this->occurred_at->toIso8601String(),
             'received_at' => $this->received_at->toIso8601String(),
             'status' => $this->status->value,

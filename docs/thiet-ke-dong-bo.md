@@ -243,8 +243,8 @@ Mười dòng. Bảy dòng bạn nêu, ba dòng tôi thêm vì chúng sẽ xảy
 | 1 | Bếp báo hết món, POS offline vẫn gọi món đó | **Nhận món**, đánh dấu `mon_da_het` | ✅ |
 | 2 | Hai máy cùng offline, cùng mở bàn 5 | Máy đến trước giữ bàn, mọi thao tác con của nó chạy bình thường. **Cả cụm** (open_session + thao tác con) của máy sau gom vào MỘT bản ghi conflict — `auto_action = 'khong_lam_gi'`, không tự tạo gì cho máy sau (xem 5.0) | ✅ — GẤP |
 | 3 | Hai máy cùng gọi món vào bàn 5 | **Nhận cả hai**, cộng dồn | ❌ tự động |
-| 4 | Hai máy cùng thu tiền một lượt khách | Phiếu đầu nhận. Phiếu sau **không tạo dòng nào** trong `payments` | ✅ |
-| 5 | POS offline thu tiền, máy online đã giảm giá bàn đó | Thu ≤ tổng mới → nhận. Vượt → không tạo phiếu | ✅ nếu vượt |
+| 4 | Hai máy cùng thu tiền một lượt khách | Phiếu đầu nhận. Phiếu sau **không tạo dòng nào** trong `payments` — tách hai loại theo dữ liệu thật (sửa 05/08, xem 5.0.1): **4a** đúng khoản đã thu (`thu_tien_trung`), **4b** khác khoản, nghi thu một phần ở hai nơi (`thu_mot_phan_vuot`) | ✅ |
+| 5 | POS offline thu tiền, tổng bàn đã đổi ở nơi khác | Thu ≤ tổng mới → nhận. Vượt → không tạo phiếu — tách hai loại theo dữ liệu thật (sửa 05/08, xem 5.0.1): **5a** tổng đổi vì giảm giá thật (`thu_vuot_giam_gia`), **5b** tổng đổi vì lý do khác — thường là huỷ món (`thu_vuot_tong_doi_khac`) | ✅ nếu vượt |
 | 6 | Gọi món vào lượt khách máy khác đã đóng | **Không** nhét vào lượt cũ — thao tác này và mọi thao tác con của nó gom vào một bản ghi conflict (xem 5.0) | ✅ |
 | 7 | Phiếu thu thuộc ca đã đóng ở server | Đề xuất gán sang ca đang mở. Không có ca mở → chờ | ✅ |
 | 8 | Giá món đổi giữa lúc gọi và lúc đồng bộ | **Ghi theo giá server**, đánh dấu `gia_lech` | ✅ |
@@ -270,6 +270,32 @@ Khi một thao tác GỐC (ví dụ `open_session`) bị phát hiện va chạm,
 
 **Xung đột dòng 2 là GẤP (`is_urgent = 1`, xem mục 6):** tem đã in offline, bếp đang nấu thật, nhưng món chưa tồn tại trong hệ thống và bàn đó không thanh toán được cho tới khi xử lý xong. Màn hình Bước 5 hiện nhóm gấp lên trên. Việc gán `is_urgent` cho các dòng khác (nếu có dòng nào cũng chặn đường thanh toán) xác định lúc cài đặt `SyncBatch`, theo đúng quy tắc chung ở mục 6 — tài liệu này chỉ chốt chắc chắn dòng 2.
 
+### 5.0.1. Dòng 4/5 tách bốn — phân loại bằng dữ liệu thật, không suy đoán (sửa 05/08)
+
+Bản đầu tiên của `SyncBatch` phân biệt dòng 4/5 chỉ bằng MỘT điều kiện: `paid_amount > 0` thì coi là "thu trùng" (dòng 4), `paid_amount = 0` thì coi là "đã giảm giá" (dòng 5). Sai trong hai tình huống có thật:
+
+- `paid_amount > 0` **không có nghĩa** là thu trùng — có thể lượt khách đã thu **MỘT PHẦN** ở nơi khác. Bill 500.000, đã thu 200.000, POS offline lại thu 400.000 → gắn nhãn "thu trùng" là sai, và câu hỏi "két có thừa 400.000 không?" cũng sai vì chưa từng có ai thu đủ 400.000 để mà trùng.
+- `paid_amount = 0` **không có nghĩa** là đã giảm giá — tổng có thể giảm vì **HUỶ MÓN**. Khẳng định "bàn này đã được giảm giá" khi thực ra không có khoản giảm giá nào là một câu SAI SỰ THẬT, còn tệ hơn im lặng (mục 0: chủ quán tin và quyết định sai).
+
+`SyncBatch::phanLoaiThuVuot()` đọc đủ ba thứ trước khi chọn loại xung đột — không suy đoán:
+
+1. `paid_amount` của lượt khách (theo T5, luôn bằng đúng tổng phiếu thu `completed` — không cần tự sum lại bảng `payments`).
+2. `discount_amount` hiện tại có > 0 không.
+3. Có `order_item` nào bị huỷ **SAU** `occurred_at` của thao tác thu tiền không (chỉ dùng để nêu nguyên nhân có căn cứ cho 5b, không đổi cách phân loại).
+
+Bốn loại kết quả:
+
+| Điều kiện | Loại | `conflict_kind` |
+|---|---|---|
+| `paid_amount > 0` và số tiền offline **đúng bằng** `paid_amount` | 4a — nghi thu lại đúng khoản đã thu | `thu_tien_trung` |
+| `paid_amount > 0` nhưng số tiền offline **khác** `paid_amount` | 4b — thu một phần ở hai nơi, cộng lại vượt | `thu_mot_phan_vuot` |
+| `paid_amount = 0` và `discount_amount > 0` | 5a — tổng đổi vì giảm giá thật | `thu_vuot_giam_gia` |
+| `paid_amount = 0` và `discount_amount = 0` | 5b — tổng đổi vì lý do khác (thường là huỷ món) | `thu_vuot_tong_doi_khac` |
+
+Câu thông báo LUÔN nêu số liệu thật trước (tổng phải trả, đã thu, còn thiếu, chênh lệch), rồi mới thêm một dòng nguyên nhân CÓ CĂN CỨ — dòng này chỉ xuất hiện khi dữ liệu thật sự xác nhận (ví dụ 5b chỉ nêu "có món bị huỷ sau đó" khi thật sự tìm thấy `order_item` như vậy, không suy đoán). Xem mẫu câu ở 5.1.
+
+Với 4b và 5b, lựa chọn "bỏ phiếu này" luôn kèm cảnh báo: *"Chọn cách này thì {số tiền} tiền mặt đã nhận sẽ không được ghi vào hệ thống. Chỉ chọn khi chắc chắn khách chưa đưa tiền."* — vì khác với 4a (gần như chắc chắn là thu trùng), 4b/5b không chắc chắn bằng, bỏ phiếu nhầm là mất tiền mặt thật.
+
 ### 5.1. Giải thích từng dòng và câu thông báo tiếng Việt
 
 **Dòng 1 — Bếp báo hết món.** Món đã nấu và bưng ra rồi (tem in offline, bếp làm bình thường). Từ chối là làm mất một món đã bán thật. Nhận rồi để người xem.
@@ -284,17 +310,41 @@ Khi một thao tác GỐC (ví dụ `open_session`) bị phát hiện va chạm,
 
 **Dòng 3 — Cùng gọi món.** Không phải va chạm. Gọi món là việc **cộng thêm**, hai máy cộng vào cùng một bàn là chuyện bình thường ở quán đông. Nhận cả hai, cộng dồn, không hỏi ai.
 
-**Dòng 4 — Cùng thu tiền.** Quan trọng nhất. Phiếu thứ hai **tuyệt đối không tạo dòng nào** trong `payments` — nếu tạo phiếu "tạm" thì `paid_amount` sai ngay lập tức và mọi ràng buộc T bị phá.
+**Dòng 4a — Cùng thu tiền, đúng khoản đã thu.** Quan trọng nhất. Phiếu thứ hai **tuyệt đối không tạo dòng nào** trong `payments` — nếu tạo phiếu "tạm" thì `paid_amount` sai ngay lập tức và mọi ràng buộc T bị phá.
 
-> *"Máy POS số 2 thu 380.000 tiền mặt bàn B05 lúc 20:15 khi mất mạng. Nhưng bàn B05 đã được máy POS số 1 thu đủ 380.000 lúc 20:12. Kiểm tra két: có thừa 380.000 không?"*
+> *"Máy POS số 2 thu 380.000 lúc 20:15 khi mất mạng.*
+> *Lượt khách PH-...: tổng phải trả 380.000, đã thu 380.000, còn thiếu 0.*
+> *Phiếu thu này nhiều hơn phần còn thiếu 380.000.*
+> *Bàn này đã thu đủ 380.000 trước đó — nghi đây là thu lại đúng khoản đã thu."*
 > Lựa chọn: **Két không thừa** (thu trùng, bỏ phiếu này) · **Két có thừa** (khách trả hai lần thật, ghi nhận rồi hoàn lại)
 
-Chọn "két có thừa" → tạo phiếu thu thật + một khoản chi ra để hoàn lại, cả hai trong một giao dịch.
+Chọn "két có thừa" → tạo phiếu thu thật + một khoản chi ra để hoàn lại, cả hai trong một giao dịch (không tạo `Payment` thứ hai cho CHÍNH lượt khách này — remaining đã là 0).
 
-**Dòng 5 — Thu offline, giảm giá online.** Bill 500.000, POS offline thu 500.000, nhưng máy online đã giảm còn 400.000. Thu 500.000 vào bill 400.000 là vi phạm luật "tổng không được xuống dưới đã thu" mà `CalculateBill` đang giữ.
+**Dòng 4b — Thu một phần ở hai nơi, cộng lại vượt (sửa 05/08, xem 5.0.1).** Bill 500.000, đã thu 200.000 ở nơi khác, POS offline lại thu 400.000 — số tiền offline KHÁC số đã thu, nên đây không phải "thu trùng" mà là hai lần thu một phần cộng lại vượt tổng.
 
-> *"Máy POS số 2 thu 500.000 bàn B05 lúc 20:15 khi mất mạng. Trong lúc đó bàn này đã được giảm giá còn 400.000. Khách đã đưa 500.000 — thừa 100.000."*
+> *"Máy POS số 2 thu 400.000 lúc 20:15 khi mất mạng.*
+> *Lượt khách PH-...: tổng phải trả 500.000, đã thu 200.000, còn thiếu 300.000.*
+> *Phiếu thu này nhiều hơn phần còn thiếu 100.000.*
+> *Bàn này đã thu 200.000 ở nơi khác trước đó — có thể là phần khác của cùng hoá đơn."*
+> Lựa chọn: **Bỏ phiếu này** (kèm cảnh báo mất 400.000 tiền mặt đã nhận nếu chọn nhầm) · **Ghi nhận đúng phần còn thiếu, hoàn lại phần thừa** (tạo phiếu thu 300.000, tự tính tiền thối 100.000 theo T7)
+
+**Dòng 5a — Thu offline, tổng đổi vì giảm giá thật.** Bill 500.000, POS offline thu 500.000, nhưng máy online đã giảm còn 400.000 (`discount_amount > 0` xác nhận thật). Thu 500.000 vào bill 400.000 là vi phạm luật "tổng không được xuống dưới đã thu" mà `CalculateBill` đang giữ.
+
+> *"Máy POS số 2 thu 500.000 lúc 20:15 khi mất mạng.*
+> *Lượt khách PH-...: tổng phải trả 400.000, đã thu 0, còn thiếu 400.000.*
+> *Phiếu thu này nhiều hơn phần còn thiếu 100.000.*
+> *Bàn này đã được giảm giá 100.000 lúc 20:12."*
 > Lựa chọn: **Thu 400.000, hoàn 100.000** · **Bỏ giảm giá, thu đủ 500.000**
+
+**Dòng 5b — Thu offline, tổng đổi vì lý do khác — thường là huỷ món (sửa 05/08, xem 5.0.1).** Bill 380.000, POS offline thu 380.000, nhưng tổng đã giảm còn 280.000 vì có món bị HUỶ ở nơi khác — không phải giảm giá (`discount_amount = 0`). Câu thông báo TUYỆT ĐỐI không được nói "đã giảm giá" khi không có khoản giảm giá nào.
+
+> *"Máy POS số 2 thu 380.000 lúc 20:15 khi mất mạng.*
+> *Lượt khách PH-...: tổng phải trả 280.000, đã thu 0, còn thiếu 280.000.*
+> *Phiếu thu này nhiều hơn phần còn thiếu 100.000.*
+> *Tổng bàn này đã đổi vì có món bị huỷ sau đó: Gà nướng lúc 20:10."*
+> Lựa chọn: **Bỏ phiếu này** (kèm cảnh báo mất 380.000 tiền mặt đã nhận nếu chọn nhầm) · **Thu đúng tổng hiện tại, hoàn lại phần thừa** (tạo phiếu thu 280.000, tự tính tiền thối 100.000 theo T7)
+
+Không tìm thấy `order_item` nào bị huỷ sau `occurred_at` (lý do thật sự chưa xác định được từ dữ liệu) thì câu thông báo thay bằng *"Tổng bàn này đã đổi vì lý do khác, không xác định được từ dữ liệu — kiểm tra kỹ trước khi chọn phương án."* — vẫn không suy đoán bừa.
 
 **Dòng 6 — Gọi món vào lượt đã đóng.** Tuyệt đối không nhét vào lượt cũ: lượt đó đã thu tiền, đã chốt, thêm món vào là phá số liệu đã kết sổ.
 

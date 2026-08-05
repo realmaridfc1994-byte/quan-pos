@@ -25,6 +25,7 @@ use App\Domain\Ordering\DTO\PlaceOrderData;
 use App\Domain\Ordering\DTO\PlaceOrderItemData;
 use App\Domain\Ordering\DTO\PlaceOrderItemOptionData;
 use App\Domain\Ordering\DTO\SendToKitchenData;
+use App\Domain\Ordering\Enums\OrderItemStatus;
 use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\Order;
 use App\Domain\Ordering\Models\OrderItem;
@@ -42,9 +43,13 @@ use App\Exceptions\DomainException;
 use App\Exceptions\SyncBatchLockedException;
 use App\Exceptions\ThaoTacGocKhongTimThayException;
 use App\Support\Money;
+use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Áp dụng một gói thao tác gửi lên từ máy POS offline — theo đúng
@@ -82,6 +87,17 @@ final class SyncBatch
 {
     private const SO_LAN_DEFER_TOI_DA = 5;
 
+    /**
+     * Không lên lịch chạy nền riêng (quyết định 05/08 — xem CLAUDE.md/README):
+     * một cửa sổ dòng lệnh phải mở suốt đời là thứ chắc chắn hỏng ở quán, và
+     * việc dọn sổ tay chống trùng op_uuid không đủ quan trọng để đánh đổi lấy
+     * phụ thuộc đó. Dọn NGAY TRONG luồng đồng bộ — nơi duy nhất chắc chắn
+     * được gọi thường xuyên khi quán còn hoạt động.
+     */
+    private const SO_NGAY_GIU_SYNC_APPLIED_OP = 7;
+
+    private const SO_DONG_XOA_TOI_DA_MOI_LAN = 1000;
+
     public function __construct(
         private readonly OpenTableSession $openTableSession,
         private readonly AttachTable $attachTable,
@@ -103,10 +119,17 @@ final class SyncBatch
         $lock = Cache::lock('sync:batch', 120);
 
         try {
-            return $lock->block(5, fn () => $this->apDungCaGoi($data));
+            $ketQua = $lock->block(5, fn () => $this->apDungCaGoi($data));
         } catch (LockTimeoutException) {
             throw new SyncBatchLockedException('Một gói đồng bộ khác đang được xử lý. Thử lại sau ít giây.');
         }
+
+        // Ngoài mọi DB::transaction của thao tác (khoá toàn cục sync:batch đã
+        // nhả ở dòng trên) — lỗi dọn dẹp KHÔNG BAO GIỜ được làm hỏng kết quả
+        // đồng bộ đã có, chỉ ghi log. Xem donDepSyncAppliedOpsCu().
+        $this->donDepSyncAppliedOpsCu($ketQua);
+
+        return $ketQua;
     }
 
     /** @return list<array<string, mixed>> */
@@ -449,7 +472,7 @@ final class SyncBatch
         )));
     }
 
-    // ── record_payment (dòng 4, 5, 7) ────────────────────────────────────
+    // ── record_payment (dòng 4a/4b/5a/5b/7) ──────────────────────────────
 
     /** @return array<string, mixed> */
     private function xuLyRecordPayment(SyncOperationData $op, SyncBatchData $data): array
@@ -467,38 +490,11 @@ final class SyncBatch
         }
 
         $amount = (int) $op->payload['amount'];
-        $remaining = $session->total_amount - $session->paid_amount;
+        $daThu = $session->paid_amount;
+        $conThieu = $session->total_amount - $daThu;
 
-        if ($amount > $remaining) {
-            if ($session->paid_amount > 0) {
-                $conflict = $this->taoConflict(
-                    op: $op,
-                    data: $data,
-                    kind: ConflictKind::ThuTienTrung,
-                    autoAction: 'khong_lam_gi',
-                    messageVi: "Máy POS số {$data->deviceId} thu {$this->tien($amount)} lúc {$op->occurredAt->format('H:i')} khi mất mạng, nhưng lượt khách {$session->code} đã được thu tiền ở nơi khác trước đó. Kiểm tra két: có thừa tiền không?",
-                    options: [
-                        ['key' => 'ket_khong_thua', 'label' => 'Két không thừa — thu trùng, bỏ phiếu này'],
-                        ['key' => 'ket_co_thua', 'label' => 'Két có thừa — khách trả hai lần thật, ghi nhận rồi hoàn lại'],
-                    ],
-                    tableSessionId: $session->id,
-                    isUrgent: false,
-                );
-            } else {
-                $conflict = $this->taoConflict(
-                    op: $op,
-                    data: $data,
-                    kind: ConflictKind::ThuVuotGiamGia,
-                    autoAction: 'khong_lam_gi',
-                    messageVi: "Máy POS số {$data->deviceId} thu {$this->tien($amount)} lúc {$op->occurredAt->format('H:i')} khi mất mạng, nhưng bàn này đã được giảm giá trong lúc đó, tổng còn {$this->tien($session->total_amount)}.",
-                    options: [
-                        ['key' => 'thu_du_hoan_phan_thua', 'label' => 'Thu đúng tổng mới, hoàn lại phần thừa'],
-                        ['key' => 'bo_giam_gia', 'label' => 'Bỏ giảm giá, thu đủ số tiền máy POS đã ghi'],
-                    ],
-                    tableSessionId: $session->id,
-                    isUrgent: false,
-                );
-            }
+        if ($amount > $conThieu) {
+            $conflict = $this->taoConflictThuVuot($op, $data, $session, $amount, $daThu, $conThieu);
 
             return ['op_uuid' => $op->opUuid, 'status' => OperationStatus::Conflict->value, 'conflict_id' => $conflict->id];
         }
@@ -541,6 +537,116 @@ final class SyncBatch
         }
 
         return $this->ketQuaApplied($op, $data, ['payment_id' => $payment->id]);
+    }
+
+    /**
+     * Dòng 4/5 tách bốn — sửa 05/08 sau kiểm toán: bản cũ suy đoán nguyên nhân
+     * chỉ bằng `paid_amount > 0`, sai trong hai tình huống thật:
+     *  - `paid_amount > 0` KHÔNG có nghĩa là thu trùng — có thể là đã thu MỘT
+     *    PHẦN ở nơi khác (VD bill 500k, đã thu 200k, offline lại thu 400k).
+     *  - `paid_amount = 0` KHÔNG có nghĩa là đã giảm giá — tổng có thể giảm vì
+     *    HUỶ MÓN, không phải khuyến mãi/giảm giá.
+     * Không suy đoán bừa: đọc đủ dữ liệu thật (phanLoaiThuVuot()) rồi mới
+     * chọn loại xung đột, và câu thông báo chỉ nêu NGUYÊN NHÂN CÓ CĂN CỨ.
+     */
+    private function taoConflictThuVuot(
+        SyncOperationData $op,
+        SyncBatchData $data,
+        TableSession $session,
+        int $amount,
+        int $daThu,
+        int $conThieu,
+    ): SyncConflict {
+        ['kind' => $kind, 'monHuySauDo' => $monHuySauDo] = $this->phanLoaiThuVuot($session, $amount, $daThu, $op->occurredAt);
+
+        $chenhLech = $amount - $conThieu;
+
+        $thongBao = "Máy POS số {$data->deviceId} thu {$this->tien($amount)} lúc {$op->occurredAt->format('H:i')} khi mất mạng.\n"
+            ."Lượt khách {$session->code}: tổng phải trả {$this->tien($session->total_amount)}, đã thu {$this->tien($daThu)}, còn thiếu {$this->tien($conThieu)}.\n"
+            ."Phiếu thu này nhiều hơn phần còn thiếu {$this->tien($chenhLech)}.";
+
+        $thongBao .= match ($kind) {
+            ConflictKind::ThuTienTrung => "\nBàn này đã thu đủ {$this->tien($daThu)} trước đó — nghi đây là thu lại đúng khoản đã thu.",
+            ConflictKind::ThuMotPhanVuot => "\nBàn này đã thu {$this->tien($daThu)} ở nơi khác trước đó — có thể là phần khác của cùng hoá đơn, cộng lại vượt tổng phải trả.",
+            ConflictKind::ThuVuotGiamGia => "\nBàn này đã được giảm giá {$this->tien($session->discount_amount)} lúc {$session->updated_at->format('H:i')}.",
+            ConflictKind::ThuVuotTongDoiKhac => $monHuySauDo->isNotEmpty()
+                ? "\nTổng bàn này đã đổi vì có món bị huỷ sau đó: ".$monHuySauDo
+                    ->map(fn (OrderItem $m) => "{$m->product_name} lúc {$m->cancelled_at->format('H:i')}")
+                    ->implode(', ').'.'
+                : "\nTổng bàn này đã đổi vì lý do khác, không xác định được từ dữ liệu — kiểm tra kỹ trước khi chọn phương án.",
+            default => '',
+        };
+
+        $luaChonBoPhieu = fn (string $key) => [
+            'key' => $key,
+            'label' => "Bỏ phiếu này — chọn cách này thì {$this->tien($amount)} tiền mặt đã nhận sẽ không được ghi vào hệ thống. Chỉ chọn khi chắc chắn khách chưa đưa tiền.",
+        ];
+
+        $luaChon = match ($kind) {
+            ConflictKind::ThuTienTrung => [
+                ['key' => 'ket_khong_thua', 'label' => 'Két không thừa — thu trùng, bỏ phiếu này'],
+                ['key' => 'ket_co_thua', 'label' => 'Két có thừa — khách trả hai lần thật, ghi nhận rồi hoàn lại'],
+            ],
+            ConflictKind::ThuMotPhanVuot => [
+                $luaChonBoPhieu('bo_phieu'),
+                ['key' => 'ghi_nhan_hoan_phan_thua', 'label' => 'Ghi nhận đúng phần còn thiếu, hoàn lại phần thừa cho khách'],
+            ],
+            ConflictKind::ThuVuotGiamGia => [
+                ['key' => 'thu_du_hoan_phan_thua', 'label' => 'Thu đúng tổng mới, hoàn lại phần thừa'],
+                ['key' => 'bo_giam_gia', 'label' => 'Bỏ giảm giá, thu đủ số tiền máy POS đã ghi'],
+            ],
+            ConflictKind::ThuVuotTongDoiKhac => [
+                $luaChonBoPhieu('bo_phieu'),
+                ['key' => 'thu_du_hoan_phan_thua', 'label' => 'Thu đúng tổng hiện tại, hoàn lại phần thừa'],
+            ],
+            default => [],
+        };
+
+        return $this->taoConflict(
+            op: $op,
+            data: $data,
+            kind: $kind,
+            autoAction: 'khong_lam_gi',
+            messageVi: $thongBao,
+            options: $luaChon,
+            tableSessionId: $session->id,
+            isUrgent: false,
+        );
+    }
+
+    /**
+     * Đọc đủ ba thứ trước khi quyết định loại xung đột — không suy đoán:
+     *  1. Đã có phiếu thu `completed` nào chưa, tổng bao nhiêu (đọc thẳng
+     *     `paid_amount` — theo bất biến T5, cột này LUÔN bằng đúng tổng các
+     *     phiếu thu chưa bị huỷ, không cần tự sum lại bảng `payments`).
+     *  2. `discount_amount` hiện tại có > 0 không.
+     *  3. Có `order_item` nào bị huỷ SAU thời điểm `occurred_at` của thao tác
+     *     này không — chỉ dùng để nêu nguyên nhân CÓ CĂN CỨ cho
+     *     ThuVuotTongDoiKhac, không đổi cách phân loại.
+     *
+     * @return array{kind: ConflictKind, monHuySauDo: Collection<int, OrderItem>}
+     */
+    private function phanLoaiThuVuot(TableSession $session, int $amount, int $daThu, CarbonImmutable $occurredAt): array
+    {
+        if ($daThu > 0) {
+            return [
+                'kind' => $amount === $daThu ? ConflictKind::ThuTienTrung : ConflictKind::ThuMotPhanVuot,
+                'monHuySauDo' => collect(),
+            ];
+        }
+
+        if ($session->discount_amount > 0) {
+            return ['kind' => ConflictKind::ThuVuotGiamGia, 'monHuySauDo' => collect()];
+        }
+
+        $monHuySauDo = OrderItem::query()
+            ->whereHas('order', fn ($q) => $q->where('table_session_id', $session->id))
+            ->where('status', OrderItemStatus::Cancelled)
+            ->where('cancelled_at', '>', $occurredAt)
+            ->orderByDesc('cancelled_at')
+            ->get();
+
+        return ['kind' => ConflictKind::ThuVuotTongDoiKhac, 'monHuySauDo' => $monHuySauDo];
     }
 
     private function tien(int $soTien): string
@@ -620,6 +726,45 @@ final class SyncBatch
     private function ketQuaDuplicate(SyncOperationData $op, array $serverIds): array
     {
         return ['op_uuid' => $op->opUuid, 'status' => OperationStatus::Duplicate->value, 'server_ids' => $serverIds];
+    }
+
+    /**
+     * Dọn bớt sổ tay chống trùng op_uuid (`sync_applied_ops`) cũ hơn
+     * SO_NGAY_GIU_SYNC_APPLIED_OP ngày — sổ này không phải dữ liệu giao dịch
+     * (không thuộc luật CLAUDE.md mục 13), chỉ cần giữ đủ lâu để một gói cũ
+     * gửi lại (máy POS mất mạng/khởi động lại) vẫn nhận đúng "duplicate".
+     *
+     * Chỉ chạy khi gói này thật sự CÓ áp dụng gì đó — gói toàn "duplicate"/
+     * "conflict"/"rejected"/"deferred" thì bỏ qua, đỡ một lượt truy vấn
+     * DELETE vô ích cho những gói không tạo thêm gì cần dọn.
+     *
+     * Giới hạn 1000 dòng mỗi lần — gói đồng bộ không phải lúc nào cũng phải
+     * dọn hết nợ tồn đọng ngay, dọn dần qua nhiều gói vẫn đúng, miễn không
+     * làm chậm gói đang xử lý. Lỗi ở đây CHỈ ghi log, không ném lên — một gói
+     * đồng bộ đã áp dụng xong không được phép báo lỗi vì việc dọn dẹp phụ.
+     *
+     * @param  list<array<string, mixed>>  $ketQua
+     */
+    private function donDepSyncAppliedOpsCu(array $ketQua): void
+    {
+        $coApDung = collect($ketQua)->contains(
+            fn (array $kq) => $kq['status'] === OperationStatus::Applied->value
+        );
+
+        if (! $coApDung) {
+            return;
+        }
+
+        try {
+            SyncAppliedOp::query()
+                ->where('applied_at', '<', now()->subDays(self::SO_NGAY_GIU_SYNC_APPLIED_OP))
+                ->limit(self::SO_DONG_XOA_TOI_DA_MOI_LAN)
+                ->delete();
+        } catch (Throwable $e) {
+            Log::warning('Dọn sync_applied_ops cũ thất bại — không ảnh hưởng gói đồng bộ vừa xử lý.', [
+                'message' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function timIdLuotKhach(string $uuid): int

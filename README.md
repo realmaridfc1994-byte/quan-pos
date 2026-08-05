@@ -217,7 +217,19 @@ Mã PIN dùng để đăng nhập nhanh trên máy tính bảng tại quầy (kh
 
 ---
 
-## 7. Khi gặp lỗi thì làm gì
+## 7. Dữ liệu đồng bộ cũ tự dọn, không cần ai làm gì
+
+Khi máy POS mất mạng rồi gửi lại dữ liệu (Phase 2), hệ thống ghi tạm một "sổ tay" tên `sync_applied_ops` để nhận ra thao tác nào đã làm rồi, tránh làm trùng. Sổ này **không phải hoá đơn hay dữ liệu bán hàng** — chỉ cần giữ vài ngày là đủ.
+
+**Việc dọn sổ tay này tự chạy mỗi khi có máy POS đồng bộ dữ liệu lên** — không cần bật thêm cửa sổ dòng lệnh nào, không phụ thuộc việc gì phải "để yên chạy suốt ngày đêm". Muốn dọn tay lúc nào cũng được (ví dụ lâu ngày không có máy nào đồng bộ), gõ:
+
+```bash
+php artisan sync:cleanup-applied-ops
+```
+
+---
+
+## 8. Khi gặp lỗi thì làm gì
 
 ### Lỗi 1: Mở trang web báo "Không kết nối được database" / "Connection refused"
 

@@ -13,6 +13,7 @@ use App\Domain\Ordering\Models\TableSessionTable;
 use App\Domain\Staffing\Enums\ShiftStatus;
 use App\Domain\Staffing\Models\Shift;
 use App\Exceptions\DomainException;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -68,13 +69,7 @@ final class SplitTableSession
                 ];
             }
 
-            // Luật CLAUDE.md mục 11: Shift → TableSession → (Bàn/Món).
-            $shift = Shift::query()->where('status', ShiftStatus::Open)->lockForUpdate()->first();
-
-            if ($shift === null) {
-                throw new DomainException('Chưa mở ca. Phải mở ca trước khi tách bàn.');
-            }
-
+            // Luật CLAUDE.md mục 11: Payment → TableSession → Shift → DiningTable.
             $luotGoc = TableSession::query()->lockForUpdate()->findOrFail($data->sourceTableSessionId);
 
             if ($luotGoc->status !== TableSessionStatus::Open) {
@@ -83,6 +78,12 @@ final class SplitTableSession
 
             if ($luotGoc->paid_amount > 0) {
                 throw new DomainException('Lượt khách này đã thu một phần tiền, không tự tách được. Đây là quyết định của con người, không phải của máy.');
+            }
+
+            $shift = Shift::query()->where('status', ShiftStatus::Open)->lockForUpdate()->first();
+
+            if ($shift === null) {
+                throw new DomainException('Chưa mở ca. Phải mở ca trước khi tách bàn.');
             }
 
             $idBanTheoThuTu = collect($data->diningTableIds)->unique()->sort()->values();
@@ -117,15 +118,20 @@ final class SplitTableSession
                 throw new DomainException('Phải giữ lại ít nhất một bàn cho lượt khách gốc.');
             }
 
+            // Mã hiển thị (code) cần ID tự tăng mới sinh đúng, nhưng cột code
+            // NOT NULL + UNIQUE nên phải có giá trị ngay lúc tạo — cùng cách
+            // OpenTableSession::sinhMaLuotKhach() đã vá (Phase 2 kiểm toán):
+            // ghi trước bằng uuid làm mã tạm, có id thật rồi mới gán mã thật.
             $luotMoi = TableSession::query()->create([
                 'uuid' => $data->uuid,
-                'code' => $this->sinhMaLuotKhach(),
+                'code' => substr($data->uuid, 0, 30),
                 'shift_id' => $shift->id,
                 'guest_count' => $data->guestCount,
                 'status' => TableSessionStatus::Open,
                 'opened_by_user_id' => $data->actorUserId,
                 'opened_at' => now(),
             ]);
+            $luotMoi->update(['code' => $this->sinhMaLuotKhach($luotMoi->id, $luotMoi->opened_at)]);
 
             $conLaiCuaLuotGoc = $banDangChiemCuaLuotGoc->reject(
                 fn (TableSessionTable $t) => $phanChiemDuocChon->contains('id', $t->id)
@@ -168,11 +174,21 @@ final class SplitTableSession
         });
     }
 
-    private function sinhMaLuotKhach(): string
+    /**
+     * Dùng `id` tự tăng của chính lượt khách vừa tạo — không dùng `count() + 1`
+     * (đua tranh: hai người tách bàn cùng giây ra cùng mã, lỗi UNIQUE thô hiện
+     * lên màn hình thu ngân — sửa 05/08 sau kiểm toán, đúng cách
+     * OpenTableSession::sinhMaLuotKhach() đã vá trước đó ở Bước 2).
+     *
+     * `$openedAt` PHẢI là `opened_at` của lượt khách, KHÔNG PHẢI `now()` lúc
+     * câu lệnh này chạy — cùng lý do với OpenTableSession: tách bàn xử lý một
+     * gói đồng bộ offline có thể áp dụng lại sau nửa đêm dù khách đã vào từ
+     * trước, lấy `now()` ở đây sẽ gắn nhầm ngày.
+     */
+    private function sinhMaLuotKhach(int $id, Carbon $openedAt): string
     {
-        $homNay = now()->format('Ymd');
-        $soThuTu = TableSession::query()->whereDate('opened_at', now()->toDateString())->count() + 1;
+        $ngay = $openedAt->format('Ymd');
 
-        return "PH-{$homNay}-".str_pad((string) $soThuTu, 4, '0', STR_PAD_LEFT);
+        return "PH-{$ngay}-".str_pad((string) $id, 4, '0', STR_PAD_LEFT);
     }
 }

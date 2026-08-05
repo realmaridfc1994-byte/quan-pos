@@ -18,9 +18,11 @@ use App\Domain\Billing\Models\Payment;
 use App\Domain\Catalog\Models\Category;
 use App\Domain\Catalog\Models\Product;
 use App\Domain\Catalog\Models\ProductVariant;
+use App\Domain\Ordering\Enums\OrderItemStatus;
 use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\DiningTable;
 use App\Domain\Ordering\Models\Order;
+use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
@@ -211,6 +213,127 @@ it('dòng 5: thu offline vượt tổng sau khi máy online đã giảm giá —
     expect($conflict->conflict_kind)->toBe(ConflictKind::ThuVuotGiamGia->value)
         ->and($conflict->auto_action)->toBe('khong_lam_gi')
         ->and($conflict->message_vi)->not->toBeEmpty();
+
+    expect(Payment::query()->where('table_session_id', $session->id)->count())->toBe(0);
+});
+
+// ── dòng 4/5 tách bốn (sửa 05/08 sau kiểm toán) — phân loại bằng dữ liệu thật ──
+
+it('dòng 4a: thu online đủ, offline thu đúng khoản đó — ThuTienTrung', function () {
+    $session = TableSession::factory()->withTable()->create([
+        'shift_id' => $this->ca->id,
+        'status' => TableSessionStatus::Billing,
+        'subtotal_amount' => 380_000,
+        'total_amount' => 380_000,
+        'paid_amount' => 380_000,
+    ]);
+    Payment::factory()->for($session, 'tableSession')->for($this->ca, 'shift')->create([
+        'method' => 'cash',
+        'amount' => 380_000,
+        'tendered_amount' => 380_000,
+        'change_amount' => 0,
+    ]);
+
+    $response = guiDongBo($this->thuNgan, [
+        opThuTienMat((string) Str::uuid(), $session->uuid, 380_000),
+    ], deviceId: 'pos-02')->assertOk();
+
+    $conflict = SyncConflict::query()->findOrFail($response->json('results.0.conflict_id'));
+    expect($conflict->conflict_kind)->toBe(ConflictKind::ThuTienTrung->value)
+        ->and($conflict->options)->toHaveCount(2)
+        ->and(collect($conflict->options)->pluck('key')->all())->toBe(['ket_khong_thua', 'ket_co_thua']);
+
+    expect(Payment::query()->where('table_session_id', $session->id)->count())->toBe(1);
+});
+
+it('dòng 4b: bill 500k, thu online 200k, offline thu 400k — ThuMotPhanVuot, không phải thu trùng', function () {
+    $session = TableSession::factory()->withTable()->create([
+        'shift_id' => $this->ca->id,
+        'status' => TableSessionStatus::Billing,
+        'subtotal_amount' => 500_000,
+        'total_amount' => 500_000,
+        'paid_amount' => 200_000,
+    ]);
+    Payment::factory()->for($session, 'tableSession')->for($this->ca, 'shift')->create([
+        'method' => 'cash',
+        'amount' => 200_000,
+        'tendered_amount' => 200_000,
+        'change_amount' => 0,
+    ]);
+
+    $response = guiDongBo($this->thuNgan, [
+        opThuTienMat((string) Str::uuid(), $session->uuid, 400_000),
+    ], deviceId: 'pos-02')->assertOk();
+
+    $conflict = SyncConflict::query()->findOrFail($response->json('results.0.conflict_id'));
+
+    expect($conflict->conflict_kind)->toBe(ConflictKind::ThuMotPhanVuot->value)
+        ->and($conflict->message_vi)->toContain('500.000') // tổng phải trả
+        ->and($conflict->message_vi)->toContain('200.000') // đã thu
+        ->and($conflict->message_vi)->toContain('300.000') // còn thiếu (500k - 200k)
+        ->and($conflict->message_vi)->toContain('100.000') // chênh lệch (400k - 300k)
+        ->and($conflict->message_vi)->not->toContain('thu trùng')
+        ->and(collect($conflict->options)->pluck('key')->all())->toBe(['bo_phieu', 'ghi_nhan_hoan_phan_thua']);
+
+    expect(Payment::query()->where('table_session_id', $session->id)->count())->toBe(1);
+});
+
+it('dòng 5a: bill 380k, offline thu 380k, online giảm giá còn 280k — ThuVuotGiamGia, nêu đúng số tiền và giờ giảm', function () {
+    $session = TableSession::factory()->withTable()->create([
+        'shift_id' => $this->ca->id,
+        'status' => TableSessionStatus::Billing,
+        'subtotal_amount' => 380_000,
+        'discount_amount' => 100_000,
+        'total_amount' => 280_000,
+        'discount_reason' => 'Khách quen',
+        'paid_amount' => 0,
+    ]);
+
+    $response = guiDongBo($this->thuNgan, [
+        opThuTienMat((string) Str::uuid(), $session->uuid, 380_000),
+    ], deviceId: 'pos-02')->assertOk();
+
+    $conflict = SyncConflict::query()->findOrFail($response->json('results.0.conflict_id'));
+    $gioGiam = $session->fresh()->updated_at->format('H:i');
+
+    expect($conflict->conflict_kind)->toBe(ConflictKind::ThuVuotGiamGia->value)
+        ->and($conflict->message_vi)->toContain('100.000')
+        ->and($conflict->message_vi)->toContain($gioGiam)
+        ->and(collect($conflict->options)->pluck('key')->all())->toBe(['thu_du_hoan_phan_thua', 'bo_giam_gia']);
+
+    expect(Payment::query()->where('table_session_id', $session->id)->count())->toBe(0);
+});
+
+it('dòng 5b: bill 380k, offline thu 380k, online huỷ món 100k — ThuVuotTongDoiKhac, không phải giảm giá', function () {
+    $session = TableSession::factory()->withTable()->create([
+        'shift_id' => $this->ca->id,
+        'status' => TableSessionStatus::Billing,
+        'subtotal_amount' => 280_000,
+        'discount_amount' => 0,
+        'total_amount' => 280_000,
+        'paid_amount' => 0,
+    ]);
+    $don = Order::factory()->for($session, 'tableSession')->create();
+    OrderItem::factory()->for($don, 'order')->create([
+        'status' => OrderItemStatus::Cancelled,
+        'cancelled_at' => now(),
+        'cancelled_by_user_id' => $this->thuNgan->id,
+        'cancel_reason' => 'Khách đổi ý',
+        'product_name' => 'Gà nướng',
+        'unit_price' => 100_000,
+        'quantity' => 1,
+    ]);
+
+    $response = guiDongBo($this->thuNgan, [
+        opThuTienMat((string) Str::uuid(), $session->uuid, 380_000, occurredAt: now()->subMinutes(30)->toIso8601String()),
+    ], deviceId: 'pos-02')->assertOk();
+
+    $conflict = SyncConflict::query()->findOrFail($response->json('results.0.conflict_id'));
+
+    expect($conflict->conflict_kind)->toBe(ConflictKind::ThuVuotTongDoiKhac->value)
+        ->and($conflict->message_vi)->not->toContain('giảm giá')
+        ->and($conflict->message_vi)->toContain('Gà nướng')
+        ->and(collect($conflict->options)->pluck('key')->all())->toBe(['bo_phieu', 'thu_du_hoan_phan_thua']);
 
     expect(Payment::query()->where('table_session_id', $session->id)->count())->toBe(0);
 });

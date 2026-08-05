@@ -46,8 +46,10 @@ final class SyncConflictResource extends Resource
     private const NHAN_LOAI = [
         'mon_da_het' => 'Bếp báo hết món',
         'hai_may_mo_ban' => 'Hai máy cùng mở bàn',
-        'thu_tien_trung' => 'Hai máy cùng thu tiền',
-        'thu_vuot_giam_gia' => 'Thu offline, giảm giá online',
+        'thu_tien_trung' => 'Hai máy cùng thu tiền, đúng khoản đã thu',
+        'thu_mot_phan_vuot' => 'Thu một phần ở hai nơi, cộng lại vượt',
+        'thu_vuot_giam_gia' => 'Thu offline, tổng đổi vì giảm giá',
+        'thu_vuot_tong_doi_khac' => 'Thu offline, tổng đổi vì lý do khác',
         'luot_da_dong' => 'Gọi món vào lượt đã đóng',
         'ca_da_dong' => 'Phiếu thu thuộc ca đã đóng',
         'gia_lech' => 'Giá món đổi',
@@ -56,7 +58,7 @@ final class SyncConflictResource extends Resource
     ];
 
     /** @var list<string> */
-    private const CAN_PIN_DUYET = ['thu_tien_trung', 'thu_vuot_giam_gia'];
+    private const CAN_PIN_DUYET = ['thu_tien_trung', 'thu_mot_phan_vuot', 'thu_vuot_giam_gia', 'thu_vuot_tong_doi_khac'];
 
     public static function form(Form $form): Form
     {

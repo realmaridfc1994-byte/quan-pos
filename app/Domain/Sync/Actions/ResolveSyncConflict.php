@@ -25,10 +25,13 @@ use App\Domain\Ordering\DTO\PlaceOrderData;
 use App\Domain\Ordering\DTO\PlaceOrderItemData;
 use App\Domain\Ordering\DTO\PlaceOrderItemOptionData;
 use App\Domain\Ordering\DTO\SendToKitchenData;
+use App\Domain\Ordering\Enums\OrderItemStatus;
+use App\Domain\Ordering\Enums\OrderStatus;
 use App\Domain\Ordering\Models\Order;
 use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Ordering\Models\TableSessionTable;
+use App\Domain\Ordering\Policies\TableSessionPolicy;
 use App\Domain\Staffing\Actions\RecordCashMovement;
 use App\Domain\Staffing\Actions\VerifyApproverPin;
 use App\Domain\Staffing\DTO\PinVerifyData;
@@ -36,10 +39,12 @@ use App\Domain\Staffing\DTO\RecordCashMovementData;
 use App\Domain\Staffing\Enums\CashDirection;
 use App\Domain\Staffing\Enums\ShiftStatus;
 use App\Domain\Staffing\Models\Shift;
+use App\Domain\Staffing\Models\User;
 use App\Domain\Sync\DTO\ResolveSyncConflictData;
 use App\Domain\Sync\Enums\ConflictKind;
 use App\Domain\Sync\Enums\ConflictStatus;
 use App\Domain\Sync\Models\SyncConflict;
+use App\Exceptions\ApprovalPinRequiredException;
 use App\Exceptions\DomainException;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
@@ -64,17 +69,32 @@ use Illuminate\Support\Str;
  * Action Phase 1 gọi bên trong dùng `DB::transaction` riêng của chúng, Laravel
  * tự biến thành SAVEPOINT lồng nhau — hỏng ở bất kỳ bước nào thì rollback hết,
  * xung đột vẫn giữ nguyên "pending" để thử lại, không bao giờ chốt nửa vời.
+ *
+ * DUYỆT PIN LUÔN XẢY RA TRƯỚC KHI MỞ TRANSACTION (sửa 05/08 sau kiểm toán):
+ * nếu xung đột cần người duyệt — hoặc chắc chắn cần (thu trùng, thu vượt sau
+ * giảm giá), hoặc CÓ THỂ cần tuỳ số tiền (giá món đổi, khi khoản giảm bù vượt
+ * ngưỡng % của người xử lý) — việc xác thực PIN diễn ra ở duyetPinTruocGiaoDich()
+ * TRƯỚC bất kỳ `DB::transaction`/`lockForUpdate` nào. Thiếu hoặc sai PIN thì
+ * ném ApprovalPinRequiredException ngay tại đó: chưa khoá một dòng dữ liệu
+ * nào, chưa có gì để rollback. Lý do: một giao dịch mở sẵn rồi mới phát hiện
+ * thiếu PIN sẽ giữ khoá TableSession/Shift trong lúc chờ người khác đi lấy mã
+ * — không ai thu tiền được các bàn khác thuộc cùng ca trong lúc đó.
  */
 final class ResolveSyncConflict
 {
     /**
-     * Xung đột dính tiền — bắt buộc người duyệt bằng mã PIN trước khi ghi
-     * quyết định, kể cả khi chọn "Bỏ qua" (đây cũng là một quyết định về
-     * tiền, không phải việc không ai chịu trách nhiệm).
+     * Xung đột dính tiền, LUÔN cần người duyệt bằng mã PIN bất kể số tiền —
+     * kể cả khi chọn "Bỏ qua" (đây cũng là một quyết định về tiền, không phải
+     * việc không ai chịu trách nhiệm).
      *
      * @var list<ConflictKind>
      */
-    private const CAN_PIN_DUYET = [ConflictKind::ThuTienTrung, ConflictKind::ThuVuotGiamGia];
+    private const CAN_PIN_DUYET = [
+        ConflictKind::ThuTienTrung,
+        ConflictKind::ThuMotPhanVuot,
+        ConflictKind::ThuVuotGiamGia,
+        ConflictKind::ThuVuotTongDoiKhac,
+    ];
 
     public function __construct(
         private readonly OpenTableSession $openTableSession,
@@ -92,28 +112,27 @@ final class ResolveSyncConflict
 
     public function handle(ResolveSyncConflictData $data): SyncConflict
     {
-        return DB::transaction(function () use ($data): SyncConflict {
+        // Validate những gì kiểm được mà KHÔNG cần đọc gì từ database TRƯỚC
+        // — giữ đúng thứ tự ưu tiên lỗi cũ (thiếu lý do báo trước, không lẫn
+        // với lỗi PIN) và không mở transaction cho một request chắc chắn hỏng.
+        $lyDo = trim($data->note);
+        if ($lyDo === '') {
+            throw new DomainException('Phải ghi rõ lý do quyết định.');
+        }
+
+        // Đọc KHÔNG khoá — chỉ để biết loại xung đột/phương án và quyết định
+        // có cần PIN không. Bản ghi thật sự dùng để áp dụng hiệu ứng được đọc
+        // LẠI có khoá bên trong transaction ở dưới; đọc hai lần ở đây chấp
+        // nhận được vì lần đọc này không ghi gì, không giữ khoá gì.
+        $conflictSoBo = SyncConflict::query()->findOrFail($data->conflictId);
+
+        $this->duyetPinTruocGiaoDich($conflictSoBo, $data);
+
+        return DB::transaction(function () use ($data, $lyDo): SyncConflict {
             $conflict = SyncConflict::query()->lockForUpdate()->findOrFail($data->conflictId);
 
             if ($conflict->status !== ConflictStatus::Pending) {
                 throw new DomainException('Xung đột này đã được xử lý rồi, không xử lý lại được nữa.');
-            }
-
-            $lyDo = trim($data->note);
-            if ($lyDo === '') {
-                throw new DomainException('Phải ghi rõ lý do quyết định.');
-            }
-
-            if (in_array(ConflictKind::from($conflict->conflict_kind), self::CAN_PIN_DUYET, true)) {
-                if ($data->approverUserId === null || $data->approverPin === null) {
-                    throw new DomainException('Xung đột liên quan tới tiền phải có người duyệt bằng mã PIN.');
-                }
-
-                $this->verifyApproverPin->handle(new PinVerifyData(
-                    userId: $data->approverUserId,
-                    pin: $data->approverPin,
-                    requestedByUserId: $data->resolvedByUserId,
-                ));
             }
 
             if ($data->dismiss) {
@@ -147,6 +166,188 @@ final class ResolveSyncConflict
         });
     }
 
+    /**
+     * Xác định xung đột này có cần người duyệt bằng PIN không, và xác thực
+     * PIN ngay tại đây — TRƯỚC bất kỳ DB::transaction/lockForUpdate nào (xem
+     * ghi chú đầu file). Không cần PIN thì không làm gì cả.
+     *
+     * Ba nguồn cần PIN:
+     *  1. `CAN_PIN_DUYET` — bốn loại xung đột LUÔN cần PIN bất kể số tiền
+     *     (thu trùng, thu một phần vượt, thu vượt sau giảm giá, thu vượt vì
+     *     tổng đổi lý do khác — mọi loại đều đụng tới tiền mặt đã nhận thật),
+     *     kể cả khi chọn "Bỏ qua".
+     *  2. `GiaLech` + phương án "giam_gia_bu" — CHỈ cần PIN khi khoản giảm bù
+     *     tính ra vượt ngưỡng % của người đang xử lý (chủ quán không bao giờ
+     *     cần, thu ngân cần khi vượt 20% — đúng luật đang áp cho CalculateBill
+     *     ở nghiệp vụ giảm giá tay). Ước tính % ở đây đọc dữ liệu KHÔNG khoá,
+     *     chỉ để quyết định có đòi PIN hay không — số tiền giảm bù CHÍNH THỨC
+     *     vẫn do CalculateBill tính lại một lần nữa, có khoá, bên trong
+     *     transaction. Ước tính lệch (hiếm, do dữ liệu đổi giữa hai lần đọc)
+     *     không gây sai tiền: nếu ước tính "không cần PIN" nhưng lúc tính
+     *     thật lại vượt ngưỡng, CalculateBill vẫn tự chặn và toàn bộ rollback
+     *     — chỉ mất công thử lại, không bao giờ lọt qua được ngưỡng.
+     *  3. `GiaLech` + phương án "giu_gia_moi", hoặc dismiss cho `GiaLech`:
+     *     không đổi discount gì, không bao giờ cần PIN.
+     *  4. Ba loại `HaiMayMoBan`/`LuotDaDong`/`LuotDaHuy`/`ThieuThaoTacGoc`, ở
+     *     phương án làm mới lượt khách rồi ÁP LẠI CỤM THAO TÁC (`apDungCum`/
+     *     `apDungCumTheoUuid`) — cụm này có thể chứa một thao tác
+     *     `cancel_order_item` nhắm vào dòng món ĐÃ "served" (bếp đã bưng ra
+     *     bàn trước khi xung đột được phát hiện). `CancelOrderItem::handle()`
+     *     tự đòi PIN cho trường hợp này (H5), nhưng đòi BÊN TRONG
+     *     `DB::transaction` của chính nó — nếu không kiểm trước ở đây thì
+     *     `apDungCancelOrderItem()` vẫn sẽ truyền `null`/`null` xuống, và lỗi
+     *     PIN nổ ra giữa transaction đã mở (đúng lỗi hình dạng đã sửa 05/08,
+     *     lẽ ra không được lặp lại) — xem `cumCanPinDuyet()`.
+     */
+    private function duyetPinTruocGiaoDich(SyncConflict $conflict, ResolveSyncConflictData $data): void
+    {
+        $kind = ConflictKind::from($conflict->conflict_kind);
+        $phuongAn = trim((string) $data->resolution);
+        $cum = $conflict->payload['cum'] ?? [];
+
+        $canPin = match (true) {
+            in_array($kind, self::CAN_PIN_DUYET, true) => true,
+            $kind === ConflictKind::GiaLech
+                && ! $data->dismiss
+                && $phuongAn === 'giam_gia_bu' => $this->giamGiaBuVuotNguong($conflict, $data),
+            $kind === ConflictKind::HaiMayMoBan
+                && ! $data->dismiss
+                && in_array($phuongAn, ['gop', 'tach'], true) => $this->cumCanPinDuyet($cum),
+            in_array($kind, [ConflictKind::LuotDaDong, ConflictKind::LuotDaHuy], true)
+                && ! $data->dismiss
+                && $phuongAn === 'mo_luot_moi' => $this->cumCanPinDuyet($cum),
+            $kind === ConflictKind::ThieuThaoTacGoc
+                && ! $data->dismiss
+                && $phuongAn === 'tao_luot_moi' => $this->cumCanPinDuyet($cum),
+            default => false,
+        };
+
+        if (! $canPin) {
+            return;
+        }
+
+        if ($data->approverUserId === null || $data->approverPin === null) {
+            throw new ApprovalPinRequiredException('Xung đột này cần người duyệt bằng mã PIN trước khi xử lý.');
+        }
+
+        try {
+            $this->verifyApproverPin->handle(new PinVerifyData(
+                userId: $data->approverUserId,
+                pin: $data->approverPin,
+                requestedByUserId: $data->resolvedByUserId,
+            ));
+        } catch (DomainException $e) {
+            // Sai PIN, khoá tạm, hay người duyệt không hợp lệ — với màn hình
+            // xử lý xung đột đây LUÔN là "chưa duyệt được", không phải một lỗi
+            // nghiệp vụ khác, nên đổi thành đúng mã lỗi riêng cho POS.
+            throw new ApprovalPinRequiredException($e->getMessage());
+        }
+    }
+
+    /**
+     * Ước tính (không khoá) khoản giảm bù chênh lệch giá có vượt ngưỡng %
+     * giảm giá của người đang xử lý xung đột hay không — dùng CalculateBill's
+     * cùng công thức làm tròn LÊN như CalculateBill::phanTramLamTron().
+     */
+    private function giamGiaBuVuotNguong(SyncConflict $conflict, ResolveSyncConflictData $data): bool
+    {
+        $goc = $conflict->payload['goc'] ?? null;
+        if ($goc === null) {
+            return false; // Không tính được — apDungHieuUng() sẽ tự báo lỗi thiếu payload lúc thực thi.
+        }
+
+        $chenhLech = $this->tinhChenhLechGiaLech($goc);
+        if ($chenhLech <= 0) {
+            return false;
+        }
+
+        $tableSession = TableSession::query()->find($conflict->table_session_id);
+        if ($tableSession === null) {
+            return true; // Không tra được lượt khách — an toàn hơn là bắt duyệt.
+        }
+
+        // Đọc thẳng từ order_items (KHÔNG dùng cột table_sessions.subtotal_amount
+        // — cột đó chỉ đúng SAU KHI RecalculateSessionSubtotal chạy, mà bước đó
+        // chỉ xảy ra bên trong CalculateBill, TRONG transaction, xảy ra SAU pre-check
+        // này). Cùng công thức T2 với RecalculateSessionSubtotal, chỉ khác là
+        // không ghi lại cột — đây chỉ là ước tính.
+        $tamTinh = $this->tamTinhHienTaiKhongKhoa($tableSession);
+        if ($tamTinh <= 0) {
+            return true;
+        }
+
+        $phanTram = $this->phanTramLamTron($chenhLech, $tamTinh);
+
+        $nguoiXuLy = User::query()->find($data->resolvedByUserId);
+        if ($nguoiXuLy === null) {
+            return true;
+        }
+
+        return ! (new TableSessionPolicy)->discount($nguoiXuLy, $tableSession, $phanTram);
+    }
+
+    /**
+     * Ước tính (không khoá) một cụm thao tác con có chứa lệnh huỷ món nhắm
+     * vào dòng món ĐÃ "served" hay không — nếu có, `apDungCancelOrderItem()`
+     * bên dưới chắc chắn cần PIN (H5 của `CancelOrderItem`). Đọc KHÔNG khoá,
+     * chỉ để quyết định có đòi PIN trước hay không; bản thân `CancelOrderItem`
+     * vẫn tự kiểm tra lại trạng thái CÓ khoá lúc áp dụng thật — ước tính lệch
+     * ở đây (hiếm) không làm lọt qua được lỗi thiếu PIN, cùng nguyên tắc với
+     * `giamGiaBuVuotNguong()`.
+     *
+     * @param  list<array<string, mixed>>  $cum
+     */
+    private function cumCanPinDuyet(array $cum): bool
+    {
+        foreach ($cum as $op) {
+            if (($op['type'] ?? null) !== 'cancel_order_item') {
+                continue;
+            }
+
+            $uuidDongMon = (string) ($op['payload']['order_item_uuid'] ?? '');
+            if ($uuidDongMon === '') {
+                continue;
+            }
+
+            $dongMon = OrderItem::query()->where('uuid', $uuidDongMon)->first();
+            if ($dongMon !== null && $dongMon->status === OrderItemStatus::Served) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Ước tính tạm tính hiện tại của một lượt khách — KHÔNG khoá, KHÔNG ghi
+     * lại cột `subtotal_amount` (đó là việc của RecalculateSessionSubtotal,
+     * chạy có khoá bên trong CalculateBill). Cùng công thức T2 (tổng
+     * `line_amount` của mọi dòng món chưa huỷ thuộc mọi phiếu chưa huỷ).
+     */
+    private function tamTinhHienTaiKhongKhoa(TableSession $tableSession): int
+    {
+        return (int) OrderItem::query()
+            ->whereHas('order', fn ($q) => $q
+                ->where('table_session_id', $tableSession->id)
+                ->where('status', '!=', OrderStatus::Cancelled))
+            ->where('status', '!=', OrderItemStatus::Cancelled)
+            ->sum('line_amount');
+    }
+
+    /**
+     * Cùng công thức làm tròn LÊN như CalculateBill::phanTramLamTron() — không
+     * dùng chung được vì đó là private method của class khác, và ở đây chỉ
+     * cần ƯỚC TÍNH (xem giamGiaBuVuotNguong()), không cần đi qua Money.
+     */
+    private function phanTramLamTron(int $giamGia, int $tamTinh): int
+    {
+        if ($tamTinh <= 0) {
+            return 0;
+        }
+
+        return intdiv($giamGia * 100 + $tamTinh - 1, $tamTinh);
+    }
+
     private function apDungHieuUng(SyncConflict $conflict, string $phuongAn, ResolveSyncConflictData $data): void
     {
         $kind = ConflictKind::from($conflict->conflict_kind);
@@ -160,7 +361,9 @@ final class ResolveSyncConflict
         match ($kind) {
             ConflictKind::HaiMayMoBan => $this->xuLyHaiMayMoBan($conflict, $goc, $cum, $phuongAn, $data),
             ConflictKind::ThuTienTrung => $this->xuLyThuTienTrung($conflict, $goc, $phuongAn, $data),
+            ConflictKind::ThuMotPhanVuot => $this->xuLyThuMotPhanVuot($conflict, $goc, $phuongAn, $data),
             ConflictKind::ThuVuotGiamGia => $this->xuLyThuVuotGiamGia($conflict, $goc, $phuongAn, $data),
+            ConflictKind::ThuVuotTongDoiKhac => $this->xuLyThuVuotTongDoiKhac($conflict, $goc, $phuongAn, $data),
             ConflictKind::LuotDaDong, ConflictKind::LuotDaHuy => $this->xuLyLuotDaDongHoacHuy($conflict, $goc, $cum, $phuongAn, $data),
             ConflictKind::CaDaDong => $this->xuLyCaDaDong($conflict, $goc, $phuongAn, $data),
             ConflictKind::GiaLech => $this->xuLyGiaLech($conflict, $goc, $phuongAn, $data),
@@ -194,7 +397,7 @@ final class ResolveSyncConflict
                 throw new DomainException('Không tìm thấy lượt khách nào đang giữ bàn này để gộp vào — có thể bàn đã trống, xem lại tình huống trước khi chọn "Gộp".');
             }
 
-            $this->apDungCum($cum, $ganLuot->table_session_id, $data->resolvedByUserId);
+            $this->apDungCum($cum, $ganLuot->table_session_id, $data);
 
             return;
         }
@@ -212,7 +415,7 @@ final class ResolveSyncConflict
                 openedByUserId: $data->resolvedByUserId,
             ));
 
-            $this->apDungCumTheoUuid($cum, $data->resolvedByUserId);
+            $this->apDungCumTheoUuid($cum, $data);
 
             $conflict->table_session_id = $luotMoi->id;
 
@@ -222,7 +425,7 @@ final class ResolveSyncConflict
         throw new DomainException("Phương án \"{$phuongAn}\" không áp dụng được cho loại xung đột này.");
     }
 
-    // ── dòng 4: hai máy cùng thu tiền ────────────────────────────────────
+    // ── dòng 4a: hai máy cùng thu tiền, đúng khoản đã thu ─────────────────
 
     /** @param array<string, mixed> $goc */
     private function xuLyThuTienTrung(SyncConflict $conflict, array $goc, string $phuongAn, ResolveSyncConflictData $data): void
@@ -264,7 +467,25 @@ final class ResolveSyncConflict
         throw new DomainException("Phương án \"{$phuongAn}\" không áp dụng được cho loại xung đột này.");
     }
 
-    // ── dòng 5: thu offline, giảm giá online ─────────────────────────────
+    // ── dòng 4b: thu một phần ở hai nơi, cộng lại vượt ────────────────────
+
+    /** @param array<string, mixed> $goc */
+    private function xuLyThuMotPhanVuot(SyncConflict $conflict, array $goc, string $phuongAn, ResolveSyncConflictData $data): void
+    {
+        if ($phuongAn === 'bo_phieu') {
+            return; // Không chắc khách đã đưa tiền — không tạo dữ liệu gì, đúng như đã chọn.
+        }
+
+        if ($phuongAn === 'ghi_nhan_hoan_phan_thua') {
+            $this->ghiNhanPhanConLai($conflict, $goc, $data);
+
+            return;
+        }
+
+        throw new DomainException("Phương án \"{$phuongAn}\" không áp dụng được cho loại xung đột này.");
+    }
+
+    // ── dòng 5a: thu offline, giảm giá online ─────────────────────────────
 
     /** @param array<string, mixed> $goc */
     private function xuLyThuVuotGiamGia(SyncConflict $conflict, array $goc, string $phuongAn, ResolveSyncConflictData $data): void
@@ -274,18 +495,7 @@ final class ResolveSyncConflict
         $tendered = isset($payload['tendered_amount']) ? Money::fromInt((int) $payload['tendered_amount']) : null;
 
         if ($phuongAn === 'thu_du_hoan_phan_thua') {
-            $session = TableSession::query()->lockForUpdate()->findOrFail($tableSessionId);
-            $conThieu = Money::fromInt($session->total_amount)->minus(Money::fromInt($session->paid_amount));
-
-            $this->recordPayment->handle(new RecordPaymentData(
-                uuid: (string) $payload['uuid'],
-                tableSessionId: $tableSessionId,
-                method: PaymentMethod::Cash,
-                amount: $conThieu,
-                tenderedAmount: $tendered ?? $conThieu,
-                reference: null,
-                receivedByUserId: $data->resolvedByUserId,
-            ));
+            $this->ghiNhanPhanConLai($conflict, $goc, $data);
 
             return;
         }
@@ -314,6 +524,57 @@ final class ResolveSyncConflict
         }
 
         throw new DomainException("Phương án \"{$phuongAn}\" không áp dụng được cho loại xung đột này.");
+    }
+
+    // ── dòng 5b: thu offline, tổng đổi vì lý do khác (thường là huỷ món) ──
+
+    /** @param array<string, mixed> $goc */
+    private function xuLyThuVuotTongDoiKhac(SyncConflict $conflict, array $goc, string $phuongAn, ResolveSyncConflictData $data): void
+    {
+        if ($phuongAn === 'bo_phieu') {
+            return; // Không chắc khách đã đưa tiền — không tạo dữ liệu gì, đúng như đã chọn.
+        }
+
+        if ($phuongAn === 'thu_du_hoan_phan_thua') {
+            $this->ghiNhanPhanConLai($conflict, $goc, $data);
+
+            return;
+        }
+
+        throw new DomainException("Phương án \"{$phuongAn}\" không áp dụng được cho loại xung đột này.");
+    }
+
+    /**
+     * Ghi nhận đúng phần CÒN THIẾU hiện tại (đọc lại, có khoá, tại thời điểm
+     * xử lý — không dùng số đã ước tính lúc SyncBatch phát hiện xung đột, vì
+     * dữ liệu có thể đã đổi thêm từ đó tới giờ) và hoàn phần thừa cho khách
+     * — dùng chung cho ba phương án cùng bản chất "thu đúng phần còn lại":
+     * ThuVuotGiamGia/thu_du_hoan_phan_thua, ThuMotPhanVuot/ghi_nhan_hoan_phan_thua,
+     * ThuVuotTongDoiKhac/thu_du_hoan_phan_thua. Phần "hoàn thừa" không cần
+     * CashMovement riêng — RecordPayment tự tính `change_amount` từ
+     * `tenderedAmount − amount` (T7), đúng số tiền mặt khách đã đưa mà máy
+     * POS ghi lại lúc offline.
+     *
+     * @param  array<string, mixed>  $goc
+     */
+    private function ghiNhanPhanConLai(SyncConflict $conflict, array $goc, ResolveSyncConflictData $data): void
+    {
+        $payload = $goc['payload'];
+        $tableSessionId = (int) $conflict->table_session_id;
+        $tendered = isset($payload['tendered_amount']) ? Money::fromInt((int) $payload['tendered_amount']) : null;
+
+        $session = TableSession::query()->lockForUpdate()->findOrFail($tableSessionId);
+        $conThieu = Money::fromInt($session->total_amount)->minus(Money::fromInt($session->paid_amount));
+
+        $this->recordPayment->handle(new RecordPaymentData(
+            uuid: (string) $payload['uuid'],
+            tableSessionId: $tableSessionId,
+            method: PaymentMethod::Cash,
+            amount: $conThieu,
+            tenderedAmount: $tendered ?? $conThieu,
+            reference: null,
+            receivedByUserId: $data->resolvedByUserId,
+        ));
     }
 
     // ── dòng 6/9: gọi món vào lượt đã đóng/đã huỷ ────────────────────────
@@ -354,7 +615,7 @@ final class ResolveSyncConflict
                 createdByUserId: $data->resolvedByUserId,
             ));
 
-            $this->apDungCumTheoUuid($cum, $data->resolvedByUserId);
+            $this->apDungCumTheoUuid($cum, $data);
 
             $conflict->table_session_id = $luotMoi->id;
 
@@ -418,13 +679,15 @@ final class ResolveSyncConflict
         }
 
         if ($phuongAn === 'gan_ca_dang_mo') {
+            // Luật CLAUDE.md mục 11: Payment → TableSession → Shift → DiningTable.
+            $tableSessionId = (int) $conflict->table_session_id;
+            $session = TableSession::query()->lockForUpdate()->findOrFail($tableSessionId);
+
             $caDangMo = Shift::query()->where('status', ShiftStatus::Open)->lockForUpdate()->first();
             if ($caDangMo === null) {
                 throw new DomainException('Chưa có ca nào đang mở để gán tiền này vào — chọn "Chờ mở ca mới" thay.');
             }
 
-            $tableSessionId = (int) $conflict->table_session_id;
-            $session = TableSession::query()->lockForUpdate()->findOrFail($tableSessionId);
             $session->update(['shift_id' => $caDangMo->id]);
 
             $payload = $goc['payload'];
@@ -454,32 +717,12 @@ final class ResolveSyncConflict
         }
 
         if ($phuongAn === 'giam_gia_bu') {
-            $payload = $goc['payload'];
-            $order = Order::query()->with('items')->where('uuid', (string) $payload['uuid'])->first();
+            $order = $this->timDonTheoUuidGoc($goc);
             if ($order === null) {
                 throw new DomainException('Không tìm thấy phiếu gọi món gốc để tính phần chênh lệch.');
             }
 
-            $chenhLech = 0;
-            foreach ($payload['items'] as $itemPayload) {
-                if (! isset($itemPayload['client_unit_price'])) {
-                    continue;
-                }
-
-                $dongMon = $order->items->firstWhere('uuid', $itemPayload['uuid']);
-                if ($dongMon === null) {
-                    continue;
-                }
-
-                // Server luôn ghi giá CỦA MÌNH (dongMon->unit_price). Khách chỉ cần bù
-                // phần chênh khi giá server CAO HƠN giá khách đã thấy lúc offline
-                // (client_unit_price) — phiếu tạm tính in offline mang giá thấp hơn.
-                // Giá server THẤP hơn thì khách không thiệt, không có gì để bù.
-                $chenh = ($dongMon->unit_price - (int) $itemPayload['client_unit_price']) * $dongMon->quantity;
-                if ($chenh > 0) {
-                    $chenhLech += $chenh;
-                }
-            }
+            $chenhLech = $this->tinhChenhLechTuDon($order, $goc);
 
             $this->calculateBill->handle(new CalculateBillData(
                 tableSessionId: (int) $conflict->table_session_id,
@@ -488,14 +731,75 @@ final class ResolveSyncConflict
                     ? "Giảm bù chênh lệch giá — xung đột #{$conflict->id}, phiếu tạm tính offline mang giá cũ."
                     : null,
                 requestedByUserId: $data->resolvedByUserId,
-                approverUserId: null,
-                approverPin: null,
+                approverUserId: $data->approverUserId,
+                approverPin: $data->approverPin,
             ));
 
             return;
         }
 
         throw new DomainException("Phương án \"{$phuongAn}\" không áp dụng được cho loại xung đột này.");
+    }
+
+    /** @param array<string, mixed> $goc */
+    private function timDonTheoUuidGoc(array $goc): ?Order
+    {
+        $payload = $goc['payload'];
+
+        return Order::query()->with('items')->where('uuid', (string) $payload['uuid'])->first();
+    }
+
+    /**
+     * Số tiền khách cần được bù do server ghi giá CAO HƠN giá đã thấy lúc gọi
+     * món offline (`client_unit_price`) — dùng chung bởi xuLyGiaLech() (áp
+     * dụng thật, đã tự kiểm `$order !== null` trước khi gọi) và
+     * giamGiaBuVuotNguong() (ước tính trước để quyết định có cần PIN hay
+     * không, xem duyetPinTruocGiaoDich() và tinhChenhLechGiaLech()).
+     *
+     * @param  array<string, mixed>  $goc
+     */
+    private function tinhChenhLechTuDon(Order $order, array $goc): int
+    {
+        $payload = $goc['payload'];
+
+        $chenhLech = 0;
+        foreach ($payload['items'] as $itemPayload) {
+            if (! isset($itemPayload['client_unit_price'])) {
+                continue;
+            }
+
+            $dongMon = $order->items->firstWhere('uuid', $itemPayload['uuid']);
+            if ($dongMon === null) {
+                continue;
+            }
+
+            // Server luôn ghi giá CỦA MÌNH (dongMon->unit_price). Khách chỉ cần bù
+            // phần chênh khi giá server CAO HƠN giá khách đã thấy lúc offline
+            // (client_unit_price) — phiếu tạm tính in offline mang giá thấp hơn.
+            // Giá server THẤP hơn thì khách không thiệt, không có gì để bù.
+            $chenh = ($dongMon->unit_price - (int) $itemPayload['client_unit_price']) * $dongMon->quantity;
+            if ($chenh > 0) {
+                $chenhLech += $chenh;
+            }
+        }
+
+        return $chenhLech;
+    }
+
+    /**
+     * Ước tính khoản giảm bù (KHÔNG khoá, có thể trả 0 nếu không tìm thấy
+     * phiếu gốc — xem giamGiaBuVuotNguong()).
+     *
+     * @param  array<string, mixed>  $goc
+     */
+    private function tinhChenhLechGiaLech(array $goc): int
+    {
+        $order = $this->timDonTheoUuidGoc($goc);
+        if ($order === null) {
+            return 0; // xuLyGiaLech() tự ném lỗi rõ ràng khi thật sự áp dụng; ở đây chỉ là ước tính.
+        }
+
+        return $this->tinhChenhLechTuDon($order, $goc);
     }
 
     // ── dòng 10: thiếu thao tác gốc ──────────────────────────────────────
@@ -536,7 +840,7 @@ final class ResolveSyncConflict
                 createdByUserId: $data->resolvedByUserId,
             ));
 
-            $this->apDungCumTheoUuid($cum, $data->resolvedByUserId);
+            $this->apDungCumTheoUuid($cum, $data);
 
             $conflict->table_session_id = $luotMoi->id;
 
@@ -556,10 +860,10 @@ final class ResolveSyncConflict
      *
      * @param  list<array<string, mixed>>  $cum
      */
-    private function apDungCum(array $cum, int $tableSessionId, int $nguoiThucHien): void
+    private function apDungCum(array $cum, int $tableSessionId, ResolveSyncConflictData $data): void
     {
         foreach ($cum as $op) {
-            $this->apDungMotOpDonGian($op, $tableSessionId, $nguoiThucHien);
+            $this->apDungMotOpDonGian($op, $tableSessionId, $data);
         }
     }
 
@@ -570,17 +874,18 @@ final class ResolveSyncConflict
      *
      * @param  list<array<string, mixed>>  $cum
      */
-    private function apDungCumTheoUuid(array $cum, int $nguoiThucHien): void
+    private function apDungCumTheoUuid(array $cum, ResolveSyncConflictData $data): void
     {
         foreach ($cum as $op) {
-            $this->apDungMotOpDonGian($op, null, $nguoiThucHien);
+            $this->apDungMotOpDonGian($op, null, $data);
         }
     }
 
     /** @param array<string, mixed> $op */
-    private function apDungMotOpDonGian(array $op, ?int $ganLuotId, int $nguoiThucHien): void
+    private function apDungMotOpDonGian(array $op, ?int $ganLuotId, ResolveSyncConflictData $data): void
     {
         $payload = $op['payload'];
+        $nguoiThucHien = $data->resolvedByUserId;
 
         match ($op['type']) {
             'place_order' => $this->placeOrder->handle(new PlaceOrderData(
@@ -593,7 +898,7 @@ final class ResolveSyncConflict
             'send_to_kitchen' => $this->sendToKitchen->handle(new SendToKitchenData(
                 orderId: $this->timIdDonTheoUuid((string) $payload['order_uuid']),
             )),
-            'cancel_order_item' => $this->apDungCancelOrderItem($payload, $nguoiThucHien),
+            'cancel_order_item' => $this->apDungCancelOrderItem($payload, $data),
             'attach_table' => $this->attachTable->handle(new AttachTableData(
                 tableSessionId: $ganLuotId ?? $this->timIdLuotTheoUuid((string) $payload['table_session_uuid']),
                 diningTableId: (int) $payload['dining_table_id'],
@@ -656,8 +961,16 @@ final class ResolveSyncConflict
         return Order::query()->where('uuid', $uuid)->firstOrFail()->id;
     }
 
-    /** @param array<string, mixed> $payload */
-    private function apDungCancelOrderItem(array $payload, int $nguoiThucHien): void
+    /**
+     * PIN cho lệnh huỷ món "served" đã được duyệt TRƯỚC ở
+     * `duyetPinTruocGiaoDich()`/`cumCanPinDuyet()` (nếu cần) — truyền tiếp
+     * đúng cặp approver đã duyệt, không phải `null`/`null`, để
+     * `CancelOrderItem::handle()` không phải tự đòi PIN lần nữa GIỮA
+     * transaction đang mở.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function apDungCancelOrderItem(array $payload, ResolveSyncConflictData $data): void
     {
         $dongMon = OrderItem::query()->where('uuid', (string) $payload['order_item_uuid'])->firstOrFail();
 
@@ -666,9 +979,9 @@ final class ResolveSyncConflict
             orderItemId: $dongMon->id,
             quantity: (int) $payload['quantity'],
             reason: (string) $payload['reason'],
-            cancelledByUserId: $nguoiThucHien,
-            approverUserId: null,
-            approverPin: null,
+            cancelledByUserId: $data->resolvedByUserId,
+            approverUserId: $data->approverUserId,
+            approverPin: $data->approverPin,
             newItemUuid: $payload['new_item_uuid'] ?? null,
             optionUuids: $payload['option_uuids'] ?? [],
         ));
