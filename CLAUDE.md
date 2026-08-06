@@ -5,8 +5,7 @@ Khi hướng dẫn ở đây khác với thói quen mặc định của Laravel 
 
 Tài liệu nền tảng, đọc khi cần chi tiết:
 
-- `docs/schema.md` — thiết kế cơ sở dữ liệu đầy đủ: 15 bảng, DDL, 40 bất biến, chiến lược khoá. **Đây là nguồn chân lý về dữ liệu.**
-- `docs/huong-dan-docker.md` — cách dựng môi trường MySQL bằng Docker và 27 tình huống nghiệp vụ đã kiểm chứng.
+- `docs/schema.md` — thiết kế cơ sở dữ liệu đầy đủ: 15 bảng, DDL, 40 bất biến, chiến lược khoá. **Đây là nguồn chân lý DUY NHẤT về dữ liệu.**
 
 ---
 
@@ -30,8 +29,7 @@ Phase 1 (đang làm) là bán hàng và đối soát ca. Phase 3 sẽ là trừ 
 | Pest | 3.x | Framework test duy nhất. Không viết test kiểu PHPUnit class. Chốt bản 3.x vì Pest 4 cần PHP ≥ 8.3, máy dev đang PHP 8.2 |
 | Laravel Pint | 1.x | Format code duy nhất. Không dùng php-cs-fixer/ecs riêng |
 | Larastan / PHPStan | level 6 | Nếu chưa cài thì hỏi trước khi cài |
-| Docker Compose | MySQL 8.4 cổng **3307**, phpMyAdmin cổng **8080** | Cổng 3307 vì máy dev đang có XAMPP chiếm 3306 |
-| Timezone | `Asia/Ho_Chi_Minh` | Cả PHP, MySQL và container |
+| Timezone | `Asia/Ho_Chi_Minh` | Cả PHP và MySQL |
 | Tiền tệ | VND, `BIGINT UNSIGNED`, đơn vị **đồng** | Không có số thập phân ở bất kỳ đâu |
 
 Trước khi khẳng định một phiên bản, kiểm tra thật: `php artisan --version`, `composer show laravel/framework pestphp/pest`.
@@ -96,7 +94,6 @@ tests/
 ├── Feature/                      Test qua HTTP, có database thật. ĐÂY LÀ CHỦ LỰC
 └── Unit/                         Chỉ cho Money và các hàm tính toán thuần
 
-docker/mysql/init/01-schema.sql   DDL cho môi trường Docker demo (xem cảnh báo mục 7)
 docs/                             Tài liệu thiết kế
 ```
 
@@ -146,6 +143,8 @@ Món hàng nào không rõ thuộc nhóm nào thì hỏi, đừng tự đoán.
 16. **Mọi khoá ngoại là `ON DELETE RESTRICT`.** Không `CASCADE`, không `SET NULL`.
 17. **Trạng thái luôn là PHP Enum backed by string**, cast trong Model. Không so sánh chuỗi trần `=== 'open'` rải rác trong code.
 18. **Giữ chỗ nhiều bàn thì luôn khoá theo `dining_table_id` tăng dần** — đây là quy tắc chống kẹt chéo (deadlock) đã chốt ở `docs/schema.md` Phần 6. Không có ngoại lệ.
+
+**Schema chỉ có MỘT nguồn chân lý: `docs/schema.md`, và migration là bản thực thi của nó. Không tạo thêm file SQL dựng sẵn ở bất kỳ đâu — file không ai chạy là file sẽ lệch mà không ai biết.** (Dự án từng có `docker/mysql/init/*.sql` làm nguồn thứ hai, lệch 13 bảng so với schema thật vì không ai chạy nó — đã xoá cả thư mục `docker/` ngày 06/08. Dựng môi trường từ đầu dùng đúng một lệnh: `php artisan migrate:fresh --seed`.)
 
 ### Code và test
 
@@ -768,13 +767,6 @@ $table->unique('occupied_table_id', 'uq_tst_one_session_per_table');
 ## 6. LỆNH THƯỜNG DÙNG
 
 ```bash
-# ── DATABASE (Docker) ────────────────────────────────────────────────
-docker compose up -d                  # Bật MySQL 8.4 (cổng 3307) + phpMyAdmin (cổng 8080)
-docker compose ps                     # Xem container còn sống không
-docker compose logs -f mysql          # Xem log MySQL
-docker compose down                   # Tắt, GIỮ dữ liệu
-# docker compose down -v              # XOÁ LUÔN DỮ LIỆU — xem mục 7, phải hỏi trước
-
 # ── CHẠY DEV ─────────────────────────────────────────────────────────
 composer install
 php artisan serve                     # API ở http://localhost:8000
@@ -825,14 +817,14 @@ Những việc dưới đây **Claude Code không được tự ý làm**. Gặp
 ### Về schema và migration
 
 1. **Không sửa file migration đã chạy trên production.** Đã chạy rồi thì sửa file đó vô nghĩa và nguy hiểm. Cần đổi thì tạo migration mới.
-2. **Không đổi schema mà không hỏi** — thêm/xoá/đổi tên bảng, cột, index, ràng buộc, enum. Schema đã được thiết kế, kiểm chứng thật trên MySQL 8.4.11 và ghi thành tài liệu. Muốn đổi thì trình bày lý do trước, được đồng ý mới làm, và **cập nhật đồng thời cả ba nơi**: `docs/schema.md`, `database/migrations/`, `docker/mysql/init/01-schema.sql`.
+2. **Không đổi schema mà không hỏi** — thêm/xoá/đổi tên bảng, cột, index, ràng buộc, enum. Schema đã được thiết kế, kiểm chứng thật trên MySQL 8.4.11 và ghi thành tài liệu. Muốn đổi thì trình bày lý do trước, được đồng ý mới làm, và **cập nhật đồng thời cả hai nơi**: `docs/schema.md`, `database/migrations/`.
 3. **Không chạy `php artisan migrate:fresh`, `migrate:refresh`, `migrate:rollback`, `db:wipe` trên bất kỳ database nào không phải máy dev của chính mình.**
 4. **Không bỏ ràng buộc CHECK, khoá UNIQUE hay khoá ngoại cho "code chạy được".** Test đỏ vì vướng ràng buộc nghĩa là code sai, không phải ràng buộc sai. Đặc biệt không được đụng tới `uq_tst_one_session_per_table` và `uq_shifts_only_one_open` — đó là hai chốt chặn quan trọng nhất hệ thống.
 5. **Không đụng vào ba cột chừa cho Phase 3** (`tracks_inventory`, `stock_unit`, `stock_factor`) và không tạo bảng kho (`ingredients`, `recipes`, `stock_entries`) trước khi Phase 3 chính thức bắt đầu.
 
 ### Về dữ liệu
 
-6. **Không chạy lệnh xoá dữ liệu**: `DELETE`, `TRUNCATE`, `DROP`, `docker compose down -v`, xoá volume `quanpos_mysql_data`, `Model::truncate()`, `forceDelete()`. Cần dữ liệu sạch để test thì dùng database test riêng.
+6. **Không chạy lệnh xoá dữ liệu**: `DELETE`, `TRUNCATE`, `DROP`, `Model::truncate()`, `forceDelete()`. Cần dữ liệu sạch để test thì dùng database test riêng.
 7. **Không xoá cứng dữ liệu giao dịch trong code**, kể cả khi đề bài nói "xoá". Trong quán, "xoá" luôn có nghĩa là **huỷ có ghi lý do**.
 8. **Không viết seeder hay script ghi vào database production.**
 9. **Không tự sửa dữ liệu bằng SQL tay để "chữa" một lỗi.** Báo lỗi cho chủ dự án, đề xuất cách sửa.
@@ -841,7 +833,7 @@ Những việc dưới đây **Claude Code không được tự ý làm**. Gặp
 
 10. **Không cài package mới mà không hỏi** — không `composer require`, không `npm install <tên package>`. Mỗi package là một thứ phải bảo trì mãi mãi. Đề xuất kèm lý do và nói rõ nếu Laravel đã có sẵn tính năng đó.
 11. **Không nâng phiên bản** PHP, Laravel, MySQL, hay bất kỳ dependency nào.
-12. **Không sửa `.env`, `docker-compose.yml`, `composer.json`, `package.json`, cấu hình CI** mà không hỏi.
+12. **Không sửa `.env`, `composer.json`, `package.json`, cấu hình CI** mà không hỏi.
 13. **Không đưa mật khẩu, token, mã bí mật vào code.** Chỉ đọc từ `.env` qua `config()`.
 
 ### Về cách làm việc

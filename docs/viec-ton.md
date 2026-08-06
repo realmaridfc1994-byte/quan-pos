@@ -22,6 +22,7 @@ Ví dụ:
 ## Danh sách
 
 <!-- Claude Code thêm dòng mới ở dưới đây -->
+[Đã xử lý 05/08] Xoá thư mục docker/ — chỉ còn một nguồn chân lý cho schema là docs/schema.md, dựng lại bằng migrate:fresh --seed
 [Phase 4] Máy đặt ở quán: đặt APP_ENV=production, APP_DEBUG=false trong .env — 31/07
 [Phase 1] option_groups chưa có ràng buộc chống trùng (name, product_id, category_id) — cần cột sinh tự động như uq_tst_one_session_per_table. Hiện chỉ dựa vào quy ước trong seeder — 31/07
 [Bước 8] CloseShift đang dò lượt khách mở bằng truy vấn trực tiếp — thay bằng Action của Bước 3 khi có — 01/08
@@ -62,7 +63,7 @@ Ví dụ:
 [Bước 4 tiếp] pos.js (Bước 3) queue thao tác "goi-mon" GỘP CHUNG place_order + send_to_kitchen thành một dòng hàng chờ, nhưng SyncBatch (Bước 4) định nghĩa đây là HAI loại thao tác riêng (`place_order` phụ thuộc `open_session`, `send_to_kitchen` phụ thuộc `place_order`) đúng theo docs/thiet-ke-dong-bo.md mục 1/3.1. Khi nối pos.js thật sự gọi POST /sync/batch (việc chưa làm — hiện queue chỉ nằm trong Dexie), phải tách lại thành hai op riêng kèm depends_on đúng, không gửi nguyên dạng 'goi-mon' cũ — 04/08
 [Bước sau] Năm loại thao tác không có cột uuid riêng để tra "đã áp dụng chưa" (attach_table, detach_table, send_to_kitchen, close_session, cancel_order_item huỷ TOÀN BỘ) — gửi lại một op_uuid đã xử lý sẽ ra "rejected" kèm câu của Action gốc (VD "Bàn này không thuộc lượt khách này"), KHÔNG phải "duplicate" như thiết kế mục 3.3 mô tả cho các loại có uuid. Không có rủi ro dữ liệu sai (Action đã tự chặn double-apply), chỉ là máy POS thấy "rejected" thay vì "duplicate" khi gửi lại 5 loại này — cần quyết định khi làm màn Bước 5 xem có cần phân biệt hiển thị hai trường hợp này với người dùng không — 04/08
 [Điều kiện cần trước khi chạy migration sync_conflicts trên máy khác] Đã tự chạy `php artisan migrate` cho bảng sync_conflicts trên máy dev cục bộ (không phải production) để `pos:demo --den=sync` chạy được — nhắc nếu clone lại máy khác phải chạy migrate trước — 04/08
-[SỬA 04/08] Dòng trước đây ghi "docs/schema.md và docker/mysql/init/01-schema.sql CHƯA được cập nhật cho sync_conflicts" — SAI, kiểm lại thấy cả hai file ĐÃ có DDL đầy đủ cho sync_conflicts (#16) và sync_applied_ops (#17) từ trước. Việc còn thiếu thật sự chỉ là PHẦN 1 (danh sách bảng theo nhóm) của docs/schema.md chưa liệt kê hai bảng này — DDL đúng, chỉ mục lục chưa cập nhật. Không tự sửa mục lục trong lượt này (ngoài phạm vi Bước 6) — cần xác nhận trước — 04/08
+[SỬA 04/08] docs/schema.md PHẦN 1 (danh sách bảng theo nhóm) chưa liệt kê sync_conflicts (#16) và sync_applied_ops (#17) — DDL của hai bảng này trong docs/schema.md đúng và đầy đủ, chỉ mục lục chưa cập nhật. Không tự sửa mục lục trong lượt này (ngoài phạm vi Bước 6) — cần xác nhận trước — 04/08
 [Bước 5] Trang Filament xử lý xung đột giữ lại làm đường phụ để chủ quán xem lịch sử — đường chính là lớp phủ trên máy POS — 04/08
 [Bước sau] Action ApplyPromotion (Bước 6) chưa nối vào API/màn POS — đề bài Bước 6 chỉ yêu cầu Action + Filament quản lý + mốc pos:demo, chưa yêu cầu endpoint hay nút áp khuyến mãi trên màn bán hàng thật. Cần thêm khi có yêu cầu rõ — 04/08
 [Phase 4] Đối soát tự động chuyển khoản qua API ngân hàng — hiện thu ngân xác nhận bằng mắt, có rủi ro xác nhận nhầm — 04/08

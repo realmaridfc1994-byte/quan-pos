@@ -1299,3 +1299,644 @@ tình huống xem `docs/huong-dan-moi-truong.md` mục 6. Những chốt chặn 
 - Mọi ràng buộc tiền bạc T3, T4, T6, T7, T8 → hoạt động đúng
 
 Cách dựng lại môi trường để tự kiểm tra: xem `docs/huong-dan-moi-truong.md`.
+
+# PHẦN KHO — PHASE 3
+
+> Nối vào cuối `docs/schema.md`. Một nguồn chân lý duy nhất, không tạo file riêng.
+> Thiết kế: Opus 5 · Ngày 05/08/2026 · Đã duyệt sáu quyết định gốc
+> Dựa trên `docs/kiem-toan-kho.md` (Phase 3 Bước 0)
+
+---
+
+## K.1. Mười bảng và vai trò
+
+| # | Bảng | Vai trò bằng ngôn ngữ quán |
+|---|---|---|
+| 1 | `suppliers` | Nhà cung cấp: ai bán bia, ai bán gà |
+| 2 | `ingredients` | Nguyên liệu: bia Tiger, gà ta, nấm kim châm. **Bia cũng là nguyên liệu** |
+| 3 | `ingredient_units` | Quy đổi: một thùng bia = 24 lon, một kg gà = 1000 gam |
+| 4 | `recipes` | Định lượng: một phần lẩu gà ăn hết bao nhiêu gà, nấm, rau |
+| 5 | `stock_movements` | **Sổ cái kho** — mọi lần kho thay đổi ghi một dòng, không bao giờ sửa |
+| 6 | `stock_balances` | **Tồn hiện tại** — mỗi nguyên liệu một dòng: còn bao nhiêu, trị giá bao nhiêu |
+| 7 | `purchases` | Phiếu nhập hàng |
+| 8 | `purchase_items` | Từng dòng của phiếu nhập |
+| 9 | `stock_takes` | Phiếu kiểm kê |
+| 10 | `stock_take_items` | Từng dòng kiểm kê: hệ thống bảo bao nhiêu, đếm được bao nhiêu |
+
+### Ba điều cần hiểu trước khi đọc DDL
+
+**Bia là nguyên liệu.** Không có hai đường trừ kho riêng. "1 lon Tiger" là công thức một dòng: *1 lon Tiger*. Biến thể "Thùng" là công thức một dòng: *24 lon Tiger*. Mọi món đi qua cùng một đoạn code.
+
+**Số lượng là số nguyên đơn vị gốc.** Bia đếm theo lon, gà theo gam, nước mắm theo ml. Đơn vị gốc phải đủ nhỏ để mọi số lượng là số nguyên — cần một phần ba quả chanh thì đơn vị gốc là gam, không phải "quả".
+
+**Giá vốn trung bình không bao giờ được lưu.** Bảng tồn giữ hai số: *còn bao nhiêu* và *trị giá bao nhiêu tiền*. Giá trung bình tính khi cần. Xem K.4.
+
+---
+
+## K.2. Ngoại lệ về kiểu dữ liệu
+
+Toàn bộ tài liệu này quy định tiền là `BIGINT UNSIGNED`. Phần kho có **hai ngoại lệ có chủ ý**:
+
+| Cột | Kiểu | Vì sao phải cho phép âm |
+|---|---|---|
+| `stock_movements.qty_delta`, `cost_delta` | `BIGINT` (có dấu) | Sổ cái ghi cả nhập (dương) và xuất (âm). Đây là bản chất của sổ cái |
+| `stock_balances.qty`, `total_cost` | `BIGINT` (có dấu) | Tồn âm được phép — xem K.3 |
+
+Mọi cột tiền khác trong phần kho vẫn là `BIGINT UNSIGNED`.
+
+---
+
+## K.3. Quyết định: tồn âm được phép
+
+Nguyên liệu hết trên hệ thống nhưng bếp vẫn còn và vẫn nấu. Hai lựa chọn:
+
+- **Chặn bếp báo món xong** → số liệu luôn đúng, nhưng quán đứng giữa giờ đông khách vì một con số sai trong máy
+- **Cho tồn âm, cảnh báo** → quán chạy bình thường, tồn âm là tín hiệu định lượng sai hoặc quên nhập hàng
+
+Chọn cách thứ hai. Định lượng sẽ **không bao giờ** khớp tuyệt đối với bếp thật, nên tồn âm là chuyện sẽ xảy ra, không phải trường hợp hiếm.
+
+Tồn âm hiện cảnh báo trên màn hình chủ quán và trong báo cáo kiểm kê. Nó không chặn gì cả.
+
+---
+
+## K.4. Giá vốn bình quân gia quyền — cách giữ không mất đồng nào
+
+`stock_balances` giữ **cặp** `(qty, total_cost)`. Giá vốn trung bình **không lưu**, tính khi cần: `total_cost ÷ qty`.
+
+**Khi nhập** `n` đơn vị hết `c` đồng:
+```
+qty        += n
+total_cost += c
+```
+
+**Khi xuất** `n` đơn vị:
+```
+giá vốn lô xuất = làm tròn(total_cost × n ÷ qty)
+total_cost     -= giá vốn lô xuất
+qty            -= n
+```
+
+Điểm mấu chốt: trừ đi **đúng con số đã làm tròn**, nên cặp `(qty, total_cost)` luôn khớp tuyệt đối. Sai số làm tròn không biến mất và cũng không tích luỹ — nó nằm lại trong `total_cost` và được chia đều cho các lần xuất sau.
+
+Nhờ đó đẳng thức này luôn đúng đến từng đồng, và đó là bất biến **K3**:
+
+> tổng tiền đã nhập − tổng giá vốn đã xuất = `total_cost` hiện tại
+
+**Hai trường hợp biên:**
+
+1. `qty` về 0 mà `total_cost` còn dư vài đồng → ghi một dòng sổ cái loại `close_residual` với `qty_delta = 0`, `cost_delta = −(phần dư)`, đưa `total_cost` về 0. Bất biến K9 bắt buộc điều này.
+2. `qty` âm → không tính được giá vốn trung bình. Xuất kho lúc tồn âm ghi `cost_delta = 0` và đánh dấu dòng sổ cái là "chưa có giá vốn". Kiểm kê sẽ dọn.
+
+---
+
+## K.5. DDL
+
+```sql
+-- ═══════════════════════════════════════════════════════════════
+-- 16. NHÀ CUNG CẤP
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE suppliers (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    name                VARCHAR(150)    NOT NULL,
+    phone               VARCHAR(20)     NULL,
+    address             VARCHAR(255)    NULL,
+    note                VARCHAR(255)    NULL,
+    is_active           TINYINT(1)      NOT NULL DEFAULT 1,
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_suppliers_name (name),
+    KEY idx_suppliers_active (is_active, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 17. NGUYÊN LIỆU — bia và nước ngọt CŨNG là nguyên liệu
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE ingredients (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    code                VARCHAR(30)     NOT NULL COMMENT 'Mã gõ nhanh: TIGER-LON, GA-TA',
+    name                VARCHAR(150)    NOT NULL,
+
+    -- Đơn vị gốc: mọi số lượng trong hệ thống tính theo đơn vị này.
+    -- PHẢI đủ nhỏ để mọi số lượng là SỐ NGUYÊN. Cần 1/3 quả chanh thì
+    -- đơn vị gốc là 'g' hoặc 'ml', không phải 'cai'.
+    base_unit           ENUM('g','ml','cai','lon','chai') NOT NULL,
+
+    category            VARCHAR(50)     NULL COMMENT 'Bia rượu, Thịt, Rau, Gia vị...',
+    min_qty             BIGINT UNSIGNED NOT NULL DEFAULT 0
+                        COMMENT 'Dưới mức này thì cảnh báo tồn thấp. 0 = không cảnh báo',
+    is_active           TINYINT(1)      NOT NULL DEFAULT 1,
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_ingredients_code (code),
+    UNIQUE KEY uq_ingredients_name (name),
+    KEY idx_ingredients_active (is_active, category, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 18. QUY ĐỔI ĐƠN VỊ — MỘT CẤP, không bắc cầu
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE ingredient_units (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    ingredient_id       BIGINT UNSIGNED NOT NULL,
+    unit_name           VARCHAR(30)     NOT NULL COMMENT 'Thùng, Kg, Lít, Két',
+
+    -- 1 đơn vị này = factor đơn vị gốc. Thùng bia = 24. Kg gà = 1000.
+    -- BẮT BUỘC là số nguyên (K8) — nếu không quy đổi được bằng số nguyên
+    -- thì chọn đơn vị gốc nhỏ hơn.
+    factor              INT UNSIGNED    NOT NULL,
+
+    is_purchase_default TINYINT(1)      NOT NULL DEFAULT 0
+                        COMMENT 'Đơn vị chọn sẵn khi nhập hàng',
+
+    -- Bảo đảm mỗi nguyên liệu chỉ có ĐÚNG MỘT đơn vị nhập mặc định.
+    -- Cùng cách làm với uq_shifts_only_one_open.
+    purchase_default_guard BIGINT UNSIGNED
+                        GENERATED ALWAYS AS (IF(is_purchase_default = 1, ingredient_id, NULL)) STORED,
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_ingredient_units_name (ingredient_id, unit_name),
+    UNIQUE KEY uq_ingredient_units_default (purchase_default_guard),
+
+    CONSTRAINT ck_ingredient_units_factor CHECK (factor >= 1),
+    CONSTRAINT fk_ingredient_units_ingredient FOREIGN KEY (ingredient_id)
+        REFERENCES ingredients (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 19. ĐỊNH LƯỢNG MÓN — một biến thể ăn hết những nguyên liệu gì
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE recipes (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    product_variant_id  BIGINT UNSIGNED NOT NULL,
+    ingredient_id       BIGINT UNSIGNED NOT NULL,
+
+    -- Số lượng theo ĐƠN VỊ GỐC của nguyên liệu. 1 lẩu gà = 800 (gam gà).
+    -- 1 lon Tiger = 1 (lon Tiger). 1 thùng Tiger = 24 (lon Tiger).
+    qty_base            INT UNSIGNED    NOT NULL,
+
+    note                VARCHAR(255)    NULL,
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_recipes_variant_ingredient (product_variant_id, ingredient_id),
+    KEY idx_recipes_ingredient (ingredient_id),
+
+    CONSTRAINT ck_recipes_qty CHECK (qty_base >= 1),
+    CONSTRAINT fk_recipes_variant FOREIGN KEY (product_variant_id)
+        REFERENCES product_variants (id),
+    CONSTRAINT fk_recipes_ingredient FOREIGN KEY (ingredient_id)
+        REFERENCES ingredients (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 20. SỔ CÁI KHO — chỉ ghi thêm, không bao giờ sửa hay xoá
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE stock_movements (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    ingredient_id       BIGINT UNSIGNED NOT NULL,
+
+    type                ENUM('purchase','sale','waste','adjust','stocktake',
+                             'return','close_residual') NOT NULL
+                        COMMENT 'purchase=nhập, sale=bán, waste=hỏng vỡ, adjust=điều chỉnh tay, stocktake=kiểm kê, return=trả NCC, close_residual=chốt số dư khi tồn về 0',
+
+    -- CÓ DẤU: dương là vào kho, âm là ra kho. Ngoại lệ có chủ ý so với
+    -- quy ước BIGINT UNSIGNED — xem mục K.2.
+    qty_delta           BIGINT          NOT NULL COMMENT 'Thay đổi số lượng, theo đơn vị gốc',
+    cost_delta          BIGINT          NOT NULL COMMENT 'Thay đổi trị giá tồn (đồng)',
+
+    -- Chụp lại tồn NGAY SAU dòng này. Dùng để đối soát nhanh và dò lỗi.
+    qty_after           BIGINT          NOT NULL,
+    cost_after          BIGINT          NOT NULL,
+
+    has_cost            TINYINT(1)      NOT NULL DEFAULT 1
+                        COMMENT '0 = xuất lúc tồn âm, chưa xác định được giá vốn',
+
+    -- K11: mọi dòng phải chỉ về nguồn gốc
+    ref_type            ENUM('order_item','purchase_item','stock_take_item','manual') NOT NULL,
+    ref_id              BIGINT UNSIGNED NULL,
+
+    reason              VARCHAR(255)    NULL,
+    approved_by_user_id BIGINT UNSIGNED NULL COMMENT 'Bắt buộc với type=adjust (K12)',
+    created_by_user_id  BIGINT UNSIGNED NOT NULL,
+    shift_id            BIGINT UNSIGNED NULL COMMENT 'Ca lúc phát sinh, để tra ngược',
+
+    occurred_at         DATETIME        NOT NULL,
+    created_at          TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+
+    -- K5 + K7: mỗi dòng món trừ mỗi nguyên liệu ĐÚNG MỘT LẦN, mãi mãi.
+    -- ref_id NULL (manual) không bị chặn vì MariaDB cho nhiều NULL trong
+    -- khoá duy nhất.
+    UNIQUE KEY uq_stock_movements_ref (ref_type, ref_id, ingredient_id),
+
+    KEY idx_stock_movements_ledger (ingredient_id, id),
+    KEY idx_stock_movements_type_time (type, occurred_at),
+    KEY idx_stock_movements_shift (shift_id, occurred_at),
+
+    CONSTRAINT ck_stock_movements_delta CHECK (qty_delta <> 0 OR cost_delta <> 0),
+    CONSTRAINT ck_stock_movements_purchase CHECK (type <> 'purchase' OR qty_delta > 0),
+    CONSTRAINT ck_stock_movements_sale    CHECK (type <> 'sale'     OR qty_delta < 0),
+    CONSTRAINT ck_stock_movements_waste   CHECK (type <> 'waste'    OR qty_delta < 0),
+    CONSTRAINT ck_stock_movements_residual CHECK (type <> 'close_residual' OR qty_delta = 0),
+    CONSTRAINT ck_stock_movements_ref     CHECK (ref_type = 'manual' OR ref_id IS NOT NULL),
+    CONSTRAINT ck_stock_movements_adjust  CHECK (
+        type <> 'adjust'
+     OR (approved_by_user_id IS NOT NULL
+         AND reason IS NOT NULL
+         AND CHAR_LENGTH(reason) >= 10)
+    ),
+    CONSTRAINT ck_stock_movements_waste_reason CHECK (
+        type <> 'waste' OR (reason IS NOT NULL AND CHAR_LENGTH(reason) >= 5)
+    ),
+
+    CONSTRAINT fk_stock_movements_ingredient FOREIGN KEY (ingredient_id)
+        REFERENCES ingredients (id),
+    CONSTRAINT fk_stock_movements_approver FOREIGN KEY (approved_by_user_id)
+        REFERENCES users (id),
+    CONSTRAINT fk_stock_movements_creator FOREIGN KEY (created_by_user_id)
+        REFERENCES users (id),
+    CONSTRAINT fk_stock_movements_shift FOREIGN KEY (shift_id)
+        REFERENCES shifts (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 21. TỒN HIỆN TẠI — cặp (số lượng, trị giá), KHÔNG lưu giá trung bình
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE stock_balances (
+    -- Khoá chính là ingredient_id: mỗi nguyên liệu ĐÚNG MỘT dòng,
+    -- không thể sinh ra dòng thứ hai.
+    ingredient_id       BIGINT UNSIGNED NOT NULL,
+
+    qty                 BIGINT          NOT NULL DEFAULT 0
+                        COMMENT 'Còn bao nhiêu, theo đơn vị gốc. ÂM ĐƯỢC PHÉP — xem K.3',
+    total_cost          BIGINT          NOT NULL DEFAULT 0
+                        COMMENT 'Trị giá số tồn (đồng). Giá TB = total_cost / qty, KHÔNG lưu',
+
+    last_movement_id    BIGINT UNSIGNED NULL COMMENT 'Dòng sổ cái gần nhất, để dò lỗi',
+    updated_at          TIMESTAMP       NULL,
+
+    PRIMARY KEY (ingredient_id),
+    KEY idx_stock_balances_low (qty),
+
+    -- K9: tồn về 0 thì trị giá phải về 0, không để lại đồng lẻ
+    CONSTRAINT ck_stock_balances_zero CHECK (qty <> 0 OR total_cost = 0),
+    -- Tồn dương thì trị giá không được âm
+    CONSTRAINT ck_stock_balances_cost CHECK (qty <= 0 OR total_cost >= 0),
+
+    CONSTRAINT fk_stock_balances_ingredient FOREIGN KEY (ingredient_id)
+        REFERENCES ingredients (id),
+    CONSTRAINT fk_stock_balances_movement FOREIGN KEY (last_movement_id)
+        REFERENCES stock_movements (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 22. PHIẾU NHẬP HÀNG
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE purchases (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    code                VARCHAR(30)     NOT NULL COMMENT 'NH-20260805-0042',
+    supplier_id         BIGINT UNSIGNED NOT NULL,
+
+    status              ENUM('draft','received','cancelled') NOT NULL DEFAULT 'draft',
+    total_cost          BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Tổng tiền phiếu (đồng)',
+
+    note                VARCHAR(255)    NULL,
+    invoice_no          VARCHAR(50)     NULL COMMENT 'Số hoá đơn của nhà cung cấp',
+
+    received_at         DATETIME        NULL,
+    received_by_user_id BIGINT UNSIGNED NULL,
+    cancel_reason       VARCHAR(255)    NULL,
+
+    created_by_user_id  BIGINT UNSIGNED NOT NULL,
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_purchases_code (code),
+    KEY idx_purchases_supplier_date (supplier_id, received_at),
+    KEY idx_purchases_status (status, created_at),
+
+    CONSTRAINT ck_purchases_received CHECK (
+        status <> 'received'
+     OR (received_at IS NOT NULL AND received_by_user_id IS NOT NULL)
+    ),
+    CONSTRAINT ck_purchases_cancelled CHECK (
+        status <> 'cancelled' OR cancel_reason IS NOT NULL
+    ),
+
+    CONSTRAINT fk_purchases_supplier FOREIGN KEY (supplier_id)
+        REFERENCES suppliers (id),
+    CONSTRAINT fk_purchases_receiver FOREIGN KEY (received_by_user_id)
+        REFERENCES users (id),
+    CONSTRAINT fk_purchases_creator FOREIGN KEY (created_by_user_id)
+        REFERENCES users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 23. DÒNG PHIẾU NHẬP
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE purchase_items (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    purchase_id         BIGINT UNSIGNED NOT NULL,
+    ingredient_id       BIGINT UNSIGNED NOT NULL,
+
+    -- Người nhập gõ theo đơn vị tiện dùng: "5 thùng"
+    unit_name           VARCHAR(30)     NOT NULL,
+    qty_input           INT UNSIGNED    NOT NULL COMMENT 'Số lượng theo unit_name',
+
+    -- CHỤP LẠI hệ số quy đổi tại thời điểm nhập. Cùng nguyên tắc với việc
+    -- chụp giá món vào order_items: đổi quy đổi sau này KHÔNG làm thay đổi
+    -- phiếu nhập cũ.
+    factor_snapshot     INT UNSIGNED    NOT NULL,
+
+    qty_base            BIGINT UNSIGNED
+                        GENERATED ALWAYS AS (qty_input * factor_snapshot) STORED
+                        COMMENT 'Máy tự tính, không ai nhập tay được',
+
+    unit_cost           BIGINT UNSIGNED NOT NULL COMMENT 'Giá một đơn vị nhập (đồng/thùng)',
+    line_cost           BIGINT UNSIGNED
+                        GENERATED ALWAYS AS (qty_input * unit_cost) STORED,
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_purchase_items_ingredient (purchase_id, ingredient_id),
+    KEY idx_purchase_items_ingredient (ingredient_id, id),
+
+    CONSTRAINT ck_purchase_items_qty CHECK (qty_input >= 1),
+    CONSTRAINT ck_purchase_items_factor CHECK (factor_snapshot >= 1),
+    CONSTRAINT ck_purchase_items_cost CHECK (unit_cost >= 0),
+
+    CONSTRAINT fk_purchase_items_purchase FOREIGN KEY (purchase_id)
+        REFERENCES purchases (id),
+    CONSTRAINT fk_purchase_items_ingredient FOREIGN KEY (ingredient_id)
+        REFERENCES ingredients (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 24. PHIẾU KIỂM KÊ
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE stock_takes (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    code                VARCHAR(30)     NOT NULL COMMENT 'KK-20260805-01',
+
+    status              ENUM('open','closed','cancelled') NOT NULL DEFAULT 'open',
+
+    -- Chỉ được có ĐÚNG MỘT phiếu kiểm kê đang mở. Cùng cách làm với
+    -- uq_shifts_only_one_open.
+    open_guard          TINYINT UNSIGNED
+                        GENERATED ALWAYS AS (IF(status = 'open', 1, NULL)) STORED,
+
+    total_diff_cost     BIGINT          NULL COMMENT 'Tổng giá trị chênh lệch (đồng), có dấu',
+
+    note                VARCHAR(255)    NULL,
+    opened_at           DATETIME        NOT NULL,
+    opened_by_user_id   BIGINT UNSIGNED NOT NULL,
+    closed_at           DATETIME        NULL,
+    closed_by_user_id   BIGINT UNSIGNED NULL,
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_stock_takes_code (code),
+    UNIQUE KEY uq_stock_takes_only_one_open (open_guard),
+    KEY idx_stock_takes_status (status, opened_at),
+
+    -- K10: phiếu đã chốt phải có đủ thông tin và không sửa được nữa
+    CONSTRAINT ck_stock_takes_closed CHECK (
+        status <> 'closed'
+     OR (closed_at IS NOT NULL AND closed_by_user_id IS NOT NULL
+         AND total_diff_cost IS NOT NULL)
+    ),
+
+    CONSTRAINT fk_stock_takes_opener FOREIGN KEY (opened_by_user_id)
+        REFERENCES users (id),
+    CONSTRAINT fk_stock_takes_closer FOREIGN KEY (closed_by_user_id)
+        REFERENCES users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 25. DÒNG KIỂM KÊ
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE stock_take_items (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    stock_take_id       BIGINT UNSIGNED NOT NULL,
+    ingredient_id       BIGINT UNSIGNED NOT NULL,
+
+    -- Chụp lại tồn hệ thống TẠI THỜI ĐIỂM MỞ PHIẾU. Không đổi về sau.
+    system_qty          BIGINT          NOT NULL,
+    counted_qty         BIGINT          NULL COMMENT 'NULL = chưa đếm',
+
+    diff_qty            BIGINT
+                        GENERATED ALWAYS AS (counted_qty - system_qty) STORED
+                        COMMENT 'Máy tự tính. NULL khi chưa đếm',
+
+    note                VARCHAR(255)    NULL,
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_stock_take_items_ingredient (stock_take_id, ingredient_id),
+    KEY idx_stock_take_items_diff (stock_take_id, diff_qty),
+
+    CONSTRAINT ck_stock_take_items_counted CHECK (counted_qty IS NULL OR counted_qty >= 0),
+
+    CONSTRAINT fk_stock_take_items_take FOREIGN KEY (stock_take_id)
+        REFERENCES stock_takes (id),
+    CONSTRAINT fk_stock_take_items_ingredient FOREIGN KEY (ingredient_id)
+        REFERENCES ingredients (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+---
+
+## K.6. Sửa bảng đã có
+
+```sql
+-- product_variants.tracks_inventory GIỮ NGUYÊN — vẫn dùng để biết biến thể
+-- này có trừ kho hay không.
+--
+-- Hai cột stock_unit và stock_factor trở thành THỪA vì công thức (recipes)
+-- đã nói đủ. Giữ hay bỏ là quyết định của chủ dự án — đề xuất bỏ để không
+-- ai hiểu nhầm là còn dùng:
+--
+-- ALTER TABLE product_variants DROP COLUMN stock_unit;
+-- ALTER TABLE product_variants DROP COLUMN stock_factor;
+--
+-- CHƯA CHẠY. Chờ chủ dự án quyết ở Bước 3.
+```
+
+---
+
+## K.7. Bất biến nhóm K
+
+| Mã | Nội dung | Ai giữ |
+|---|---|---|
+| **K1** | Sổ cái không bao giờ sửa hay xoá dòng cũ | Code + kiểm tra Bước 9 |
+| **K2** | Với mọi nguyên liệu: cộng hết `qty_delta` trong sổ cái = `qty` trong bảng tồn | Job Bước 9 |
+| **K3** | Cộng hết `cost_delta` trong sổ cái = `total_cost` trong bảng tồn | Job Bước 9 |
+| **K4** | Ghi sổ cái và cập nhật tồn luôn trong cùng một giao dịch | Code |
+| **K5** | Mỗi dòng món trừ mỗi nguyên liệu đúng một lần, mãi mãi | **DB** `uq_stock_movements_ref` |
+| **K6** | Món hủy sau khi đã phục vụ không bao giờ hoàn kho | Code |
+| **K7** | Dòng món tách ra khi hủy một phần không bao giờ trừ kho | **DB** (cùng khoá K5) + code |
+| **K8** | Hệ số quy đổi luôn là số nguyên ≥ 1 | **DB** `ck_ingredient_units_factor` |
+| **K9** | Tồn về 0 thì trị giá về 0; tồn dương thì trị giá không âm | **DB** `ck_stock_balances_zero`, `ck_stock_balances_cost` |
+| **K10** | Phiếu kiểm kê đã chốt không sửa được, và phải có đủ người chốt, giờ chốt, tổng chênh | **DB** `ck_stock_takes_closed` + code |
+| **K11** | Mọi dòng sổ cái phải chỉ về nguồn gốc | **DB** `ck_stock_movements_ref` + khoá ngoại |
+| **K12** | Điều chỉnh tay bắt buộc có người duyệt và lý do dài ≥ 10 ký tự | **DB** `ck_stock_movements_adjust` |
+| **K13** | Chỉ có đúng một phiếu kiểm kê đang mở | **DB** `uq_stock_takes_only_one_open` |
+| **K14** | Mỗi nguyên liệu chỉ có đúng một đơn vị nhập mặc định | **DB** `uq_ingredient_units_default` |
+| **K15** | Hàng hỏng vỡ bắt buộc ghi lý do | **DB** `ck_stock_movements_waste_reason` |
+
+**K5 và K7 là hai bất biến quan trọng nhất.** Chúng chặn trừ kho hai lần — lỗi kho nguy hiểm nhất, vì nó không báo gì và chỉ lộ ra khi kiểm kê ba tháng sau.
+
+Cách chúng hoạt động: khoá duy nhất `(ref_type, ref_id, ingredient_id)`. Trừ kho cho dòng món số 148 lần thứ hai sẽ đâm vào khoá này và bị database từ chối, kể cả khi code có lỗi.
+
+> **Lưu ý cho Bước 9.** Job đối soát kiểm "mọi dòng món có `served_at` đều có dòng sổ cái tương ứng". Nhưng **dòng tách ra khi hủy một phần cũng có `served_at`** (kế thừa từ dòng gốc) mà **không** có dòng sổ cái — theo đúng K7. Job phải loại trừ những dòng có `split_from_item_id` khác rỗng, nếu không nó sẽ báo lệch giả mỗi lần có hủy một phần.
+
+---
+
+## K.8. Chỉ mục và lý do
+
+| Chỉ mục | Dùng cho |
+|---|---|
+| `uq_stock_movements_ref` | **Chặn trừ kho hai lần** (K5, K7). Quan trọng nhất |
+| `idx_stock_movements_ledger (ingredient_id, id)` | Job đối soát cộng dồn sổ cái từng nguyên liệu |
+| `idx_stock_movements_type_time (type, occurred_at)` | Báo cáo hao hụt theo tháng |
+| `idx_stock_movements_shift (shift_id, occurred_at)` | Tra ngược: ca này đã tiêu thụ gì |
+| `idx_stock_balances_low (qty)` | Tìm nhanh nguyên liệu sắp hết hoặc âm |
+| `idx_recipes_ingredient` | Đổi giá vốn một nguyên liệu → tìm mọi món dùng nó |
+| `idx_purchase_items_ingredient` | Lịch sử giá nhập của một nguyên liệu |
+| `idx_stock_take_items_diff` | Lọc nhanh dòng lệch trong phiếu kiểm kê |
+| `uq_stock_takes_only_one_open` | Chặn hai phiếu kiểm kê cùng mở (K13) |
+| `uq_ingredient_units_default` | Chặn hai đơn vị nhập mặc định (K14) |
+
+---
+
+## K.9. Chiến lược khoá
+
+### Chuỗi khoá mới cho `CLAUDE.md` mục 11
+
+```
+SyncConflict → Promotion → Payment → TableSession → Shift → DiningTable
+             → Purchase → StockTake → StockBalance
+```
+
+Ba loại kho nối vào **cuối chuỗi**. Lý do bằng ngôn ngữ nghiệp vụ: trừ kho luôn là việc **cuối cùng** — nó chỉ xảy ra sau khi bếp đã báo món xong, tức là sau khi mọi thứ về bàn và ca đã xong.
+
+`StockBalance` khoá theo `ingredient_id` **tăng dần**, giống quy tắc khoá nhiều bàn ở luật 18. Một phần lẩu gà chạm ba nguyên liệu — khoá sai thứ tự là hai bếp bấm cùng lúc gây kẹt chéo.
+
+### Ba luồng và cách khoá
+
+**Trừ kho khi bếp báo món xong** — trong `UpdateOrderItemStatus`, cùng giao dịch:
+```
+OrderItem → Order → StockBalance (theo ingredient_id tăng dần)
+```
+Trừ kho hỏng thì `served_at` không được đặt. Với quyết định "tồn âm được phép", gần như không còn lý do gì làm trừ kho thất bại — nên rủi ro chặn bếp là rất thấp.
+
+**Nhập hàng** — trong `ReceivePurchase`:
+```
+Purchase → StockBalance (theo ingredient_id tăng dần)
+```
+
+**Chốt kiểm kê** — trong `CloseStockTake`:
+```
+StockTake → StockBalance (theo ingredient_id tăng dần)
+```
+
+Không luồng nào khoá `StockBalance` trước rồi mới khoá thứ khác. Đó là điều kiện đủ để chứng minh không có vòng kẹt.
+
+### Luật mới cần thêm vào `CLAUDE.md`
+
+> **Không bao giờ `UPDATE stock_balances SET qty = qty - n` đứng một mình.** Mọi thay đổi tồn kho phải đi cặp — ghi một dòng sổ cái và cập nhật bảng tồn, trong cùng một giao dịch, sau khi đã khoá dòng tồn. Thấy một lệnh cập nhật tồn mà không có dòng sổ cái đi kèm là lỗi, không phải tối ưu.
+
+---
+
+## K.10. Sơ đồ quan hệ
+
+```mermaid
+erDiagram
+    ingredients ||--o{ ingredient_units : "quy đổi đơn vị"
+    ingredients ||--|| stock_balances : "tồn hiện tại"
+    ingredients ||--o{ stock_movements : "sổ cái"
+    ingredients ||--o{ recipes : "dùng trong món"
+    ingredients ||--o{ purchase_items : "được nhập"
+    ingredients ||--o{ stock_take_items : "được đếm"
+
+    product_variants ||--o{ recipes : "định lượng"
+    order_items }o--|| product_variants : "bán biến thể nào"
+    order_items ||--o{ stock_movements : "trừ kho khi phục vụ"
+
+    suppliers ||--o{ purchases : "nhập từ"
+    purchases ||--o{ purchase_items : "gồm các dòng"
+    purchase_items ||--o{ stock_movements : "sinh dòng nhập"
+
+    stock_takes ||--o{ stock_take_items : "gồm các dòng"
+    stock_take_items ||--o{ stock_movements : "sinh dòng điều chỉnh"
+
+    ingredients {
+        bigint id PK
+        varchar code UK
+        varchar name UK
+        enum base_unit "g, ml, cai, lon, chai"
+        bigint min_qty "cảnh báo tồn thấp"
+    }
+
+    stock_movements {
+        bigint id PK
+        bigint ingredient_id FK
+        enum type "purchase, sale, waste, adjust..."
+        bigint qty_delta "CÓ DẤU"
+        bigint cost_delta "CÓ DẤU, đồng"
+        enum ref_type "order_item, purchase_item..."
+        bigint ref_id "khoá duy nhất cùng ingredient_id"
+    }
+
+    stock_balances {
+        bigint ingredient_id PK
+        bigint qty "âm được phép"
+        bigint total_cost "giá TB = cost/qty, KHÔNG lưu"
+    }
+
+    recipes {
+        bigint product_variant_id FK
+        bigint ingredient_id FK
+        int qty_base "theo đơn vị gốc"
+    }
+```
+
+Chỗ nối duy nhất giữa kho và bán hàng là mũi tên `order_items → stock_movements`. Đó là chỗ nguy hiểm nhất Phase 3, và cũng là chỗ khoá duy nhất `uq_stock_movements_ref` bảo vệ.
+
+---
+
+## K.11. Ba việc phải làm ngay khi bắt đầu Bước 1
+
+- [ ] Cập nhật `CLAUDE.md` mục 11: nối `Purchase → StockTake → StockBalance` vào cuối chuỗi khoá, kèm ghi chú ngày và lý do
+- [ ] Thêm luật mới về "không cập nhật tồn đứng một mình" vào `CLAUDE.md`
+- [ ] Cập nhật mục lục Phần 1 của `docs/schema.md` với mười bảng mới
+
+Ba việc này làm **trước** khi viết migration đầu tiên. Luật phải có mặt trước khi có code chạy theo nó.

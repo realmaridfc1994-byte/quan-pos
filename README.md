@@ -14,7 +14,7 @@ Cần bật đủ 3 thứ theo đúng thứ tự: **database → máy chủ web 
 
 Mở **XAMPP Control Panel**, bấm **Start** ở dòng `MySQL`. Đèn xanh là được — dữ liệu quán (bàn, món, hoá đơn...) nằm trong này.
 
-> Quán đang dùng MariaDB có sẵn trong XAMPP ở cổng 3306, không phải MySQL Docker. Nếu sau này chuyển sang chạy bằng Docker (`docker compose up -d`), phải đổi cấu hình `.env` sang cổng 3307 — việc này cần hỏi người phụ trách kỹ thuật trước.
+> Quán dùng MariaDB có sẵn trong XAMPP ở cổng 3306.
 
 ### Trước khi chạy test lần đầu (chỉ cần làm một lần)
 
@@ -130,13 +130,15 @@ Tắt theo thứ tự nào cũng được, không sợ mất dữ liệu — d�
 
 ---
 
-## 3. Cách reset dữ liệu về trạng thái mẫu ban đầu
+## 3. Cách reset dữ liệu về trạng thái mẫu ban đầu — và cách dựng lại môi trường từ đầu
 
 ⚠️ **Việc này xoá sạch toàn bộ dữ liệu thật đang có** (bàn đang mở, hoá đơn, tiền đã thu...) và thay bằng dữ liệu mẫu để demo/test. **Không bao giờ chạy lệnh này khi quán đang hoạt động thật.**
 
 ```bash
 php artisan migrate:fresh --seed
 ```
+
+Nói bằng ngôn ngữ dễ hiểu: lệnh này dựng lại **toàn bộ** database từ đầu — đọc đúng cấu trúc bảng hiện tại trong code (không phải một file cấu hình cũ có thể đã lỗi thời), rồi nạp dữ liệu mẫu vào. Vì luôn đọc từ code hiện tại, kết quả luôn khớp với đúng phiên bản đang chạy — đây là cách duy nhất để dựng môi trường từ đầu trong dự án này.
 
 Lệnh này dựng lại toàn bộ database trắng tinh, rồi nạp:
 - 4 tài khoản mẫu (xem mục 5)
