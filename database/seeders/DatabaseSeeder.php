@@ -27,6 +27,8 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        $this->call(InventorySeeder::class);
+
         // ──────────────────────────────────────────────────────────────
         // 1. NGƯỜI DÙNG (4 người) — khoá theo phone (UNIQUE thật)
         // ──────────────────────────────────────────────────────────────

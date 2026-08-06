@@ -1,23 +1,23 @@
 # PHASE.md — BƯỚC DUY NHẤT ĐANG ĐƯỢC PHÉP LÀM
 
-> Đặt tại `docs/PHASE.md`, ghi đè bản Phase 1.
+> Đặt tại `docs/PHASE.md`, ghi đè bản Phase 2.
 > **Chỉ chủ dự án được sửa file này.** Claude Code đọc, không ghi.
 
 ```
-PHASE = 2
-BUOC_DANG_MO = 9
+PHASE = 3
+BUOC_DANG_MO = 3
 ```
 
-**Phase 2 — Chuẩn hoá vận hành. Bước 0 — Kiểm toán định danh.**
+**Phase 3 — Kho và lợi nhuận. Bước 0 — Kiểm toán chuẩn bị kho.**
 Được phép: CHỈ BÁO CÁO. Không sửa code, không tạo file ngoài file báo cáo.
 
 **Mọi việc thuộc Bước 1 trở đi: DỪNG và hỏi.**
 
 ---
 
-## Tiêu chí Phase 2
+## Tiêu chí Phase 3
 
-**Quản lý đóng ca tự tin không cần đếm tay đối chiếu, và quán vẫn bán được khi wifi rớt 10 phút.**
+**Biết chính xác món nào lãi bao nhiêu, và hao hụt mỗi tháng là bao nhiêu.**
 
 ---
 
@@ -25,28 +25,31 @@ BUOC_DANG_MO = 9
 
 | Bước | Được làm gì | Nghiệm thu |
 |---|---|---|
-| 0 | Kiểm toán định danh + thứ tự khoá — CHỈ BÁO CÁO | Có `docs/kiem-toan-offline.md` |
-| 1 | Tách bàn, chuyển món giữa hai lượt khách | `pos:demo --den=tach-ban` |
-| 2 | Định danh do máy POS sinh cho mọi bảng ghi được offline | Test quét toàn bộ endpoint ghi |
-| 3 | Kho dữ liệu trên máy POS (Dexie) + hàng chờ gửi | Rút dây mạng, gọi món vẫn được |
-| 4 | `POST /sync/batch` + ma trận xử lý xung đột | `pos:demo --den=sync` |
-| 5 | Màn hình xử lý xung đột cần người quyết | Bấm tay giải quyết được |
-| 6 | Khuyến mãi: giảm %, giảm tiền, giờ vàng | `pos:demo --den=khuyen-mai` |
-| 7 | Thanh toán QR (VietQR) | Quét thử bằng app ngân hàng |
-| 8 | Bảng tổng hợp ngày + màn hình chủ quán | Xem doanh thu 7 ngày trên điện thoại |
-| 9 | Opus review toàn phase | Hết mục 🔴 |
+| 0 | Kiểm toán chuẩn bị kho — CHỈ BÁO CÁO | Có `docs/kiem-toan-kho.md` |
+| 1 | Schema kho: 9 bảng + bất biến nhóm K | Opus duyệt thiết kế |
+| 2 | Nguyên liệu, đơn vị, quy đổi nhiều cấp | Nhập được 60 nguyên liệu qua trình duyệt |
+| 3 | Định lượng món (BOM) | Xem được 1 lẩu gà ăn hết những gì |
+| 4 | Nhập hàng + giá vốn bình quân gia quyền | Nhập 2 lô giá khác nhau, giá vốn đúng |
+| 5 | Trừ kho tự động khi món được phục vụ | `pos:demo --den=tru-kho` |
+| 6 | Hao hụt, hủy hàng, điều chỉnh | Ghi được 5 lon bia vỡ |
+| 7 | Kiểm kê và xử lý chênh lệch | Kiểm kê một vòng, chốt được |
+| 8 | Báo cáo lãi gộp theo món, theo ngày | Biết lẩu gà lãi bao nhiêu phần trăm |
+| 9 | Job đối soát sổ cái và tồn kho | Cố tình làm lệch, job phát hiện được |
+| 10 | Opus review toàn phase | Hết mục 🔴 |
 
 ## Bước đã đóng
 
-- [x] Phase 0 — 9 bước, 5 lỗi 🔴 đóng sau 2 vòng review
-- [x] Phase 1 — 11 bước, 2 lỗi 🔴 đóng sau vòng review cuối
-- [x] Bước 0 — Kiểm toán định danh  ← ĐANG MỞ
-- [x] Bước 1 — Tách bàn
-- [x] Bước 2 — Định danh client sinh
-- [x] Bước 3 — Kho dữ liệu trên máy POS
-- [x] Bước 4 — Đồng bộ hàng loạt
-- [x] Bước 5 — Màn hình xử lý xung đột
-- [x] Bước 6 — Khuyến mãi
-- [x] Bước 7 — Thanh toán QR
-- [x] Bước 8 — Báo cáo tổng hợp
-- [x] Bước 9 — Opus review
+- [x] Phase 0 — nền móng, 5 lỗi 🔴 đóng sau 2 vòng review
+- [x] Phase 1 — MVP bán hàng, 2 lỗi 🔴 đóng
+- [x] Phase 2 — offline, đồng bộ, khuyến mãi, 2 lỗi 🔴 đóng
+- [x] Bước 0 — Kiểm toán chuẩn bị kho  ← ĐANG MỞ
+- [x] Bước 1 — Schema kho
+- [ ] Bước 2 — Nguyên liệu và đơn vị
+- [ ] Bước 3 — Định lượng món
+- [ ] Bước 4 — Nhập hàng và giá vốn
+- [ ] Bước 5 — Trừ kho tự động
+- [ ] Bước 6 — Hao hụt và điều chỉnh
+- [ ] Bước 7 — Kiểm kê
+- [ ] Bước 8 — Báo cáo lãi gộp
+- [ ] Bước 9 — Job đối soát
+- [ ] Bước 10 — Opus review
