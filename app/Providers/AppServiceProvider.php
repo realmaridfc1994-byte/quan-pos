@@ -8,6 +8,12 @@ use App\Domain\Billing\Models\Payment;
 use App\Domain\Billing\Policies\PaymentPolicy;
 use App\Domain\Catalog\Models\Product;
 use App\Domain\Catalog\Policies\ProductPolicy;
+use App\Domain\Inventory\Models\Purchase;
+use App\Domain\Inventory\Models\StockMovement;
+use App\Domain\Inventory\Models\StockTake;
+use App\Domain\Inventory\Policies\PurchasePolicy;
+use App\Domain\Inventory\Policies\StockMovementPolicy;
+use App\Domain\Inventory\Policies\StockTakePolicy;
 use App\Domain\Ordering\Models\DiningTable;
 use App\Domain\Ordering\Models\Order;
 use App\Domain\Ordering\Models\OrderItem;
@@ -47,6 +53,9 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Shift::class, ShiftPolicy::class);
         Gate::policy(User::class, UserPolicy::class);
         Gate::policy(Product::class, ProductPolicy::class);
+        Gate::policy(Purchase::class, PurchasePolicy::class);
+        Gate::policy(StockMovement::class, StockMovementPolicy::class);
+        Gate::policy(StockTake::class, StockTakePolicy::class);
 
         Gate::define(
             'view-revenue-report',

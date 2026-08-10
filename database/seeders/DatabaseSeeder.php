@@ -244,6 +244,8 @@ class DatabaseSeeder extends Seeder
                 $this->createOptionsForProduct($product);
             }
         }
+
+        $this->call(RecipeSeeder::class);
     }
 
     private function createOptionsForProduct(Product $product): void

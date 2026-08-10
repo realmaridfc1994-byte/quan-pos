@@ -388,10 +388,14 @@ CREATE TABLE product_variants (
     is_active           TINYINT(1)      NOT NULL DEFAULT 1,
     sort_order          SMALLINT UNSIGNED NOT NULL DEFAULT 0,
 
-    -- Ba cột chừa sẵn cho Phase 3, hiện chưa dùng
-    tracks_inventory    TINYINT(1)      NOT NULL DEFAULT 0 COMMENT 'PHASE 3: món này có trừ kho không',
-    stock_unit          VARCHAR(20)     NULL     COMMENT 'PHASE 3: đơn vị kho — lon, chai, gam, ml',
-    stock_factor        INT UNSIGNED    NOT NULL DEFAULT 1 COMMENT 'PHASE 3: bán 1 đơn vị này trừ bao nhiêu đơn vị kho. Thùng bia = 24',
+    -- Ba cột chừa sẵn cho Phase 3 từ Phase 1 — KHÔNG dùng nữa, xem deducts_stock
+    tracks_inventory    TINYINT(1)      NOT NULL DEFAULT 0 COMMENT 'CHỜ QUYẾT: superseded bởi deducts_stock + recipes, xem docs/viec-ton.md',
+    stock_unit          VARCHAR(20)     NULL     COMMENT 'CHỜ QUYẾT: superseded bởi recipes, xem docs/viec-ton.md',
+    stock_factor        INT UNSIGNED    NOT NULL DEFAULT 1 COMMENT 'CHỜ QUYẾT: superseded bởi recipes, xem docs/viec-ton.md',
+
+    -- Phase 3 Bước 3: CÓ đúng hai trạng thái, không có "trừ thẳng" riêng —
+    -- xem docs/schema.md K.1: mọi món (kể cả bia lon) đi qua recipes.
+    deducts_stock       TINYINT(1)      NOT NULL DEFAULT 0 COMMENT 'Có trừ kho theo định lượng (recipes) không',
 
     created_at          TIMESTAMP       NULL,
     updated_at          TIMESTAMP       NULL,
@@ -1308,7 +1312,7 @@ Cách dựng lại môi trường để tự kiểm tra: xem `docs/huong-dan-moi
 
 ---
 
-## K.1. Mười bảng và vai trò
+## K.1. Mười hai bảng và vai trò
 
 | # | Bảng | Vai trò bằng ngôn ngữ quán |
 |---|---|---|
@@ -1322,6 +1326,8 @@ Cách dựng lại môi trường để tự kiểm tra: xem `docs/huong-dan-moi
 | 8 | `purchase_items` | Từng dòng của phiếu nhập |
 | 9 | `stock_takes` | Phiếu kiểm kê |
 | 10 | `stock_take_items` | Từng dòng kiểm kê: hệ thống bảo bao nhiêu, đếm được bao nhiêu |
+| 11 | `product_profit_daily` | **Sổ lãi gộp theo món, theo NGÀY** (Phase 3 Bước 8) — cùng vòng đời với `product_sales_daily`, nhưng cộng thêm giá vốn và lãi gộp. Màn hình chủ quán CHỈ đọc từ đây |
+| 12 | `ingredient_waste_monthly` | **Sổ hao hụt theo nguyên liệu, theo THÁNG** (Phase 3 Bước 8) — tổng số lượng và giá trị hao hụt (`stock_movements.type = 'waste'`) mỗi tháng, để màn hình chủ quán so tháng này với tháng trước mà không phải đọc thẳng sổ cái |
 
 ### Ba điều cần hiểu trước khi đọc DDL
 
@@ -1578,6 +1584,11 @@ CREATE TABLE stock_movements (
 
 -- ═══════════════════════════════════════════════════════════════
 -- 21. TỒN HIỆN TẠI — cặp (số lượng, trị giá), KHÔNG lưu giá trung bình
+--
+-- Tạo bảng này TRƯỚC bảng stock_movements (Bước 3, để tính giá vốn ước tính
+-- cho món). Khoá ngoại fk_stock_balances_movement bên dưới CHƯA có ở migration
+-- thật cho tới Bước 4 khi bảng stock_movements ra đời — cột last_movement_id
+-- migration Bước 3 để trống, không lỗi vì bảng đích chưa tồn tại.
 -- ═══════════════════════════════════════════════════════════════
 CREATE TABLE stock_balances (
     -- Khoá chính là ingredient_id: mỗi nguyên liệu ĐÚNG MỘT dòng,
@@ -1769,6 +1780,70 @@ CREATE TABLE stock_take_items (
         REFERENCES stock_takes (id),
     CONSTRAINT fk_stock_take_items_ingredient FOREIGN KEY (ingredient_id)
         REFERENCES ingredients (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 26. LÃI GỘP THEO MÓN, THEO NGÀY (Phase 3 Bước 8)
+-- Cùng vòng đời với product_sales_daily (mục 20) — ghi bởi việc tổng hợp
+-- chạy lúc đóng ca, TÍNH LẠI TỪ ĐẦU rồi ghi đè mỗi lần chạy (xoá theo ngày
+-- rồi chèn lại), không bao giờ cộng dồn.
+--
+-- revenue_amount ĐÃ trừ phần giảm giá phân bổ theo tỉ lệ line_amount của
+-- từng dòng món so với subtotal_amount của lượt khách đó (docs/kiem-toan-kho.md
+-- mục 5: table_sessions.discount_amount chỉ ở cấp tổng bill, không có cột
+-- nào lưu giảm giá riêng từng dòng — Action tổng hợp tự chia lại theo tỉ lệ,
+-- dòng cuối cùng của lượt khách nhận phần dư làm tròn để tổng khớp tuyệt đối
+-- với total_amount đã thu). cost_amount cộng dồn cost_delta thật của
+-- stock_movements (type=sale, ref_type=order_item) tại đúng THỜI ĐIỂM BÁN —
+-- không tính lại theo giá vốn hiện tại.
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE product_profit_daily (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    date                DATE            NOT NULL,
+    product_id          BIGINT UNSIGNED NOT NULL,
+    product_variant_id  BIGINT UNSIGNED NOT NULL,
+
+    quantity_sold       INT UNSIGNED    NOT NULL DEFAULT 0,
+    revenue_amount      BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Doanh thu ĐÃ phân bổ giảm giá theo tỉ lệ',
+    cost_amount         BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Giá vốn thật tại thời điểm bán, từ stock_movements',
+
+    profit_amount       BIGINT
+                        GENERATED ALWAYS AS (CAST(revenue_amount AS SIGNED) - CAST(cost_amount AS SIGNED)) STORED
+                        COMMENT 'Máy tự tính = doanh thu - giá vốn. CỐ Ý có dấu vì bán lỗ vẫn ghi được',
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_product_profit_daily_date_variant (date, product_variant_id),
+    KEY idx_product_profit_daily_date_product (date, product_id),
+    CONSTRAINT fk_product_profit_daily_product FOREIGN KEY (product_id)         REFERENCES products (id)         ON DELETE RESTRICT,
+    CONSTRAINT fk_product_profit_daily_variant FOREIGN KEY (product_variant_id) REFERENCES product_variants (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 27. HAO HỤT THEO NGUYÊN LIỆU, THEO THÁNG (Phase 3 Bước 8)
+-- Nguồn cho mục "hao hụt tháng này so tháng trước" trên màn hình chủ quán —
+-- không có bảng nào khác gộp hao hụt theo NGUYÊN LIỆU theo THÁNG, và màn
+-- hình không được phép đọc thẳng stock_movements. Ghi bởi cùng việc tổng
+-- hợp chạy lúc đóng ca, TÍNH LẠI TỪ ĐẦU rồi ghi đè mỗi lần chạy cho đúng
+-- tháng đang chạy.
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE ingredient_waste_monthly (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    month               DATE            NOT NULL COMMENT 'Luôn là ngày 01 của tháng, ví dụ 2026-08-01',
+    ingredient_id       BIGINT UNSIGNED NOT NULL,
+
+    waste_qty           BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Tổng số lượng hao hụt trong tháng, theo đơn vị gốc',
+    waste_cost          BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Tổng giá trị hao hụt trong tháng (đồng)',
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_ingredient_waste_monthly_month_ingredient (month, ingredient_id),
+    CONSTRAINT fk_ingredient_waste_monthly_ingredient FOREIGN KEY (ingredient_id)
+        REFERENCES ingredients (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 

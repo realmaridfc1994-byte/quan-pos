@@ -10,12 +10,14 @@ final readonly class UpdateOrderItemStatusData
 {
     public function __construct(
         public int $orderItemId,
+        public int $updatedByUserId,
     ) {}
 
     public static function fromRequest(FormRequest $request): self
     {
         return new self(
             orderItemId: (int) $request->route('orderItem')->id,
+            updatedByUserId: (int) $request->user()->id,
         );
     }
 }

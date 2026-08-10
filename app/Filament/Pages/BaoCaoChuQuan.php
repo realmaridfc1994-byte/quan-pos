@@ -5,8 +5,13 @@ declare(strict_types=1);
 namespace App\Filament\Pages;
 
 use App\Domain\Staffing\Enums\UserRole;
+use App\Filament\Widgets\BanChayLaiThapWidget;
+use App\Filament\Widgets\CanhBaoDoiSoatKhoWidget;
 use App\Filament\Widgets\DoanhThu7NgayWidget;
 use App\Filament\Widgets\DoanhThuTongQuanWidget;
+use App\Filament\Widgets\HaoHutThangNayWidget;
+use App\Filament\Widgets\LaiGopTheoMonWidget;
+use App\Filament\Widgets\TonThapWidget;
 use App\Filament\Widgets\Top10MonBanChayWidget;
 use Filament\Pages\Page;
 
@@ -14,8 +19,12 @@ use Filament\Pages\Page;
  * Phase 2 Bước 8 — màn hình chủ quán. CHỈ owner truy cập được (canAccess()),
  * xem được trên điện thoại (Filament responsive sẵn, không cần thêm gì).
  *
- * Trang này không tự truy vấn gì — chỉ ghép ba widget, mỗi widget tự đọc
- * qua GetOwnerDashboard (CHỈ đọc daily_summaries/product_sales_daily).
+ * Trang này không tự truy vấn gì — chỉ ghép các widget, mỗi widget tự đọc
+ * qua GetOwnerDashboard/GetOwnerProfitDashboard (CHỈ đọc các bảng tổng hợp,
+ * không bao giờ đọc thẳng orders/order_items/stock_movements).
+ *
+ * Bốn widget cuối (Phase 3 Bước 8) bổ sung lãi gộp/hao hụt/tồn thấp — cùng
+ * trang, không tạo màn hình riêng.
  */
 final class BaoCaoChuQuan extends Page
 {
@@ -38,6 +47,11 @@ final class BaoCaoChuQuan extends Page
             DoanhThuTongQuanWidget::class,
             DoanhThu7NgayWidget::class,
             Top10MonBanChayWidget::class,
+            LaiGopTheoMonWidget::class,
+            BanChayLaiThapWidget::class,
+            HaoHutThangNayWidget::class,
+            TonThapWidget::class,
+            CanhBaoDoiSoatKhoWidget::class,
         ];
     }
 }

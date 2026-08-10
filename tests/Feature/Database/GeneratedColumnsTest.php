@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Inventory\Models\PurchaseItem;
 use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Ordering\Models\TableSessionTable;
 use App\Domain\Staffing\Models\Shift;
@@ -63,4 +64,32 @@ it('shifts.open_guard là NULL khi ca đã đóng', function () {
     $shift = Shift::factory()->closed()->create();
 
     expect($shift->fresh()->open_guard)->toBeNull();
+});
+
+it('purchase_items.qty_base luôn do database tự tính, cố ghi tay bị chặn', function () {
+    $item = PurchaseItem::factory()->create([
+        'qty_input' => 5,
+        'factor_snapshot' => 24,
+    ]);
+
+    expect($item->fresh()->qty_base)->toBe(120);
+
+    $item->qty_base = 999_999;
+
+    expect(fn () => $item->save())->toThrow(QueryException::class);
+    expect($item->fresh()->qty_base)->toBe(120);
+});
+
+it('purchase_items.line_cost luôn do database tự tính, cố ghi tay bị chặn', function () {
+    $item = PurchaseItem::factory()->create([
+        'qty_input' => 5,
+        'unit_cost' => 300_000,
+    ]);
+
+    expect($item->fresh()->line_cost)->toBe(1_500_000);
+
+    $item->line_cost = 1;
+
+    expect(fn () => $item->save())->toThrow(QueryException::class);
+    expect($item->fresh()->line_cost)->toBe(1_500_000);
 });

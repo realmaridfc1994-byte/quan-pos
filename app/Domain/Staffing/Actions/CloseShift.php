@@ -7,10 +7,13 @@ namespace App\Domain\Staffing\Actions;
 use App\Domain\Billing\Enums\PaymentMethod;
 use App\Domain\Billing\Enums\PaymentStatus;
 use App\Domain\Billing\Models\Payment;
+use App\Domain\Inventory\Actions\ReconcileStockLedger;
 use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Ordering\Models\TableSessionTable;
 use App\Domain\Reporting\Jobs\SummarizeDailyReportJob;
+use App\Domain\Reporting\Jobs\SummarizeIngredientWasteMonthlyJob;
+use App\Domain\Reporting\Jobs\SummarizeProductProfitJob;
 use App\Domain\Staffing\DTO\CloseShiftData;
 use App\Domain\Staffing\Enums\CashDirection;
 use App\Domain\Staffing\Enums\ShiftStatus;
@@ -22,6 +25,8 @@ use App\Exceptions\DomainException;
 use App\Support\CashVariance;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Đóng ca: nhận số tiền đếm thực tế trong két, tính tiền mặt lẽ ra phải có
@@ -91,6 +96,28 @@ final class CloseShift
         // opened_at của CHÍNH CA này (không phải now()), giống quy ước sinh mã
         // ca/lượt khách — ca mở trước nửa đêm thì báo cáo tính vào đêm hôm đó.
         SummarizeDailyReportJob::dispatch($shift->opened_at->toDateString());
+
+        // Phase 3 Bước 8: cùng khuôn, cùng lý do KHÔNG nằm trong transaction ở
+        // trên — lỗi tổng hợp lãi gộp/hao hụt không được chặn việc đóng ca.
+        SummarizeProductProfitJob::dispatch($shift->opened_at->toDateString());
+        SummarizeIngredientWasteMonthlyJob::dispatch($shift->opened_at->toDateString());
+
+        // Phase 3 Bước 9: đối soát sổ cái kho — GỌI NGAY (không đẩy hàng đợi,
+        // không lịch chạy nền), NGOÀI transaction đóng ca ở trên. Lỗi đối soát
+        // không bao giờ được chặn việc đóng ca — chỉ ghi log. ReconcileStockLedger
+        // tự ghi kết quả vào activity_log để màn hình chủ quán đọc cảnh báo.
+        //
+        // Khoảng ngày đối chiếu chạy từ lúc MỞ ca tới lúc ĐÓNG ca, không phải
+        // gói gọn trong ngày mở ca: quán mở 20 giờ và đóng ca 2 giờ sáng hôm
+        // sau là chuyện thường, mọi món bưng ra sau nửa đêm vẫn phải được kiểm.
+        try {
+            app(ReconcileStockLedger::class)->handle($shift->opened_at, $shift->closed_at ?? now());
+        } catch (Throwable $e) {
+            Log::error('Đối soát sổ cái kho thất bại sau khi đóng ca: '.$e->getMessage(), [
+                'shift_id' => $shift->id,
+                'exception' => $e,
+            ]);
+        }
 
         return $shift;
     }

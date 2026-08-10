@@ -1,0 +1,78 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Domain\Inventory\Actions;
+
+use App\Domain\Inventory\DTO\CloseStockTakeData;
+use App\Domain\Inventory\DTO\RecordStockMovementData;
+use App\Domain\Inventory\Enums\StockMovementRefType;
+use App\Domain\Inventory\Enums\StockMovementType;
+use App\Domain\Inventory\Enums\StockTakeStatus;
+use App\Domain\Inventory\Models\StockTake;
+use App\Exceptions\DomainException;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Chốt phiếu kiểm kê: sinh dòng sổ cái điều chỉnh (type=stocktake) cho từng
+ * nguyên liệu LỆCH (diff_qty <> 0), rồi khoá phiếu lại — không sửa được nữa.
+ *
+ * Dòng chưa đếm (counted_qty NULL) bị bỏ qua, không sinh gì cả. Dòng khớp
+ * (diff_qty = 0) cũng không sinh gì cả — sổ cái chỉ ghi khi có thật một
+ * chênh lệch cần điều chỉnh.
+ *
+ * Khoá theo ingredient_id TĂNG DẦN trước khi gọi RecordStockMovement (mỗi
+ * lần khoá đúng một dòng stock_balances) — chống kẹt chéo, giống quy tắc
+ * khoá nhiều bàn ở CLAUDE.md mục 18 và chuỗi khoá StockTake → StockBalance
+ * ở docs/schema.md K.9.
+ */
+final class CloseStockTake
+{
+    public function __construct(
+        private readonly RecordStockMovement $recordStockMovement,
+    ) {}
+
+    public function handle(CloseStockTakeData $data): StockTake
+    {
+        return DB::transaction(function () use ($data): StockTake {
+            $phieu = StockTake::query()->lockForUpdate()->findOrFail($data->stockTakeId);
+
+            if ($phieu->status !== StockTakeStatus::Open) {
+                throw new DomainException('Phiếu kiểm kê này đã chốt hoặc đã huỷ rồi, không chốt lại được nữa.');
+            }
+
+            $dongLech = $phieu->items()
+                ->whereNotNull('counted_qty')
+                ->where('diff_qty', '<>', 0)
+                ->orderBy('ingredient_id')
+                ->get();
+
+            $tongChenhLech = 0;
+            foreach ($dongLech as $dong) {
+                $movement = $this->recordStockMovement->handle(new RecordStockMovementData(
+                    ingredientId: $dong->ingredient_id,
+                    type: StockMovementType::Stocktake,
+                    qtyDelta: $dong->diff_qty,
+                    knownCost: null,
+                    refType: StockMovementRefType::StockTakeItem,
+                    refId: $dong->id,
+                    reason: null,
+                    approvedByUserId: null,
+                    createdByUserId: $data->closedByUserId,
+                    shiftId: null,
+                ));
+
+                $tongChenhLech += $movement->cost_delta;
+            }
+
+            $phieu->update([
+                'status' => StockTakeStatus::Closed,
+                'closed_at' => now(),
+                'closed_by_user_id' => $data->closedByUserId,
+                'total_diff_cost' => $tongChenhLech,
+            ]);
+
+            return $phieu->refresh();
+        });
+    }
+}

@@ -135,6 +135,10 @@ Món hàng nào không rõ thuộc nhóm nào thì hỏi, đừng tự đoán.
 
 12. **Mọi bước duyệt PIN phải hoàn tất TRƯỚC khi mở `DB::transaction`.** Không bao giờ đòi PIN giữa một giao dịch đang mở — giao dịch treo sẽ giữ khoá trên `TableSession` và `Shift`, và trong lúc chờ người nhập PIN thì không ai thu tiền được bàn nào thuộc ca đó. (Thêm 05/08 sau kiểm toán Phase 2 Bước 9: `ResolveSyncConflict` từng truyền `approverUserId`/`approverPin` là `null` thẳng vào `CalculateBillData` cho các nhánh có thể vượt ngưỡng, khiến lỗi thiếu PIN nổ ra giữa transaction đã mở — sửa thành xác thực PIN ở một bước riêng, đọc không khoá, chạy trước `DB::transaction`; xem `ResolveSyncConflict::duyetPinTruocGiaoDich()`.)
 
+> **Bổ sung 07/08 — Phase 3 Bước 4, sau khi có `RecordStockMovement` (xem `docs/thiet-ke-gia-von.md`):**
+> - Chỉ `App\Domain\Inventory\Actions\RecordStockMovement` được ghi vào `stock_balances`. Mọi Action khác (nhập hàng, trừ kho khi bán, hao hụt, kiểm kê...) gọi nó, không tự ghi.
+> - Không bao giờ `UPDATE stock_balances SET qty = qty - n` đứng một mình. Mọi thay đổi tồn kho phải đi cặp — ghi một dòng sổ cái vào `stock_movements` và cập nhật bảng tồn, trong cùng một giao dịch, sau khi đã khoá dòng tồn.
+
 ### Dữ liệu
 
 13. **Không xoá cứng dữ liệu giao dịch.** Với `table_sessions`, `table_session_tables`, `orders`, `order_items`, `order_item_options`, `payments`, `shifts`, `cash_movements`: không `delete()`, không `truncate()`, không `forceDelete()`. Huỷ = đổi trạng thái + ghi **ai huỷ, lúc nào, vì sao**. Thiếu một trong ba thì database từ chối.

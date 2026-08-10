@@ -5,7 +5,7 @@
 
 ```
 PHASE = 3
-BUOC_DANG_MO = 3
+BUOC_DANG_MO = 9
 ```
 
 **Phase 3 — Kho và lợi nhuận. Bước 0 — Kiểm toán chuẩn bị kho.**
@@ -44,12 +44,12 @@ BUOC_DANG_MO = 3
 - [x] Phase 2 — offline, đồng bộ, khuyến mãi, 2 lỗi 🔴 đóng
 - [x] Bước 0 — Kiểm toán chuẩn bị kho  ← ĐANG MỞ
 - [x] Bước 1 — Schema kho
-- [ ] Bước 2 — Nguyên liệu và đơn vị
-- [ ] Bước 3 — Định lượng món
-- [ ] Bước 4 — Nhập hàng và giá vốn
-- [ ] Bước 5 — Trừ kho tự động
-- [ ] Bước 6 — Hao hụt và điều chỉnh
-- [ ] Bước 7 — Kiểm kê
-- [ ] Bước 8 — Báo cáo lãi gộp
+- [x] Bước 2 — Nguyên liệu và đơn vị
+- [x] Bước 3 — Định lượng món
+- [x] Bước 4 — Nhập hàng và giá vốn
+- [x] Bước 5 — Trừ kho tự động
+- [x] Bước 6 — Hao hụt và điều chỉnh
+- [x] Bước 7 — Kiểm kê
+- [x] Bước 8 — Báo cáo lãi gộp
 - [ ] Bước 9 — Job đối soát
 - [ ] Bước 10 — Opus review

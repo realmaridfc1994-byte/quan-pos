@@ -7,6 +7,8 @@ namespace App\Filament\Resources;
 use App\Domain\Catalog\Actions\SetDefaultProductVariant;
 use App\Domain\Catalog\Actions\ToggleProductVariantActive;
 use App\Domain\Catalog\Models\ProductVariant;
+use App\Domain\Inventory\Models\Ingredient;
+use App\Domain\Inventory\Queries\EstimateVariantCost;
 use App\Exceptions\DomainException;
 use App\Filament\Resources\ProductVariantResource\Pages;
 use App\Support\Money;
@@ -54,6 +56,43 @@ final class ProductVariantResource extends Resource
                 ->minValue(0)
                 ->default(0)
                 ->required(),
+
+            Forms\Components\Toggle::make('deducts_stock')
+                ->label('Trừ kho theo định lượng')
+                ->helperText('Bật lên nếu bán biến thể này thì phải trừ nguyên liệu trong kho — cả món nấu và bia/nước. Không bật với phí phục vụ, khăn lạnh.')
+                ->live(),
+
+            Forms\Components\Placeholder::make('estimated_cost')
+                ->label('Giá vốn ước tính')
+                ->visible(fn (?ProductVariant $record) => $record !== null)
+                ->content(fn (?ProductVariant $record) => $record === null
+                    ? '—'
+                    : app(EstimateVariantCost::class)->handle($record)->format().' (tính theo giá vốn nguyên liệu hiện tại, chưa gồm Bước 4)'),
+
+            Forms\Components\Repeater::make('recipes')
+                ->relationship()
+                ->label('Định lượng nguyên liệu')
+                ->helperText('Một dòng cho mỗi nguyên liệu, số lượng theo đơn vị GỐC của nguyên liệu đó (gam, ml, lon...).')
+                ->addActionLabel('Thêm nguyên liệu')
+                ->defaultItems(0)
+                ->visible(fn (Forms\Get $get) => (bool) $get('deducts_stock'))
+                ->dehydrated(fn (Forms\Get $get) => (bool) $get('deducts_stock'))
+                ->schema([
+                    Forms\Components\Select::make('ingredient_id')
+                        ->label('Nguyên liệu')
+                        ->options(fn () => Ingredient::query()->orderBy('name')->pluck('name', 'id'))
+                        ->searchable()
+                        ->required(),
+                    Forms\Components\TextInput::make('qty_base')
+                        ->label('Số lượng (đơn vị gốc)')
+                        ->numeric()
+                        ->minValue(1)
+                        ->required(),
+                    Forms\Components\TextInput::make('note')
+                        ->label('Ghi chú')
+                        ->maxLength(255),
+                ])
+                ->columns(3),
         ]);
     }
 
@@ -72,6 +111,14 @@ final class ProductVariantResource extends Resource
                 Tables\Columns\IconColumn::make('is_default')
                     ->label('Mặc định')
                     ->boolean(),
+                Tables\Columns\IconColumn::make('deducts_stock')
+                    ->label('Trừ kho')
+                    ->boolean(),
+                Tables\Columns\TextColumn::make('estimated_cost')
+                    ->label('Giá vốn ước tính')
+                    ->state(fn (ProductVariant $record) => $record->deducts_stock
+                        ? app(EstimateVariantCost::class)->handle($record)->format()
+                        : '—'),
                 Tables\Columns\IconColumn::make('is_active')
                     ->label('Đang bán')
                     ->boolean(),

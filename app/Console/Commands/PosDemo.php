@@ -14,6 +14,15 @@ use App\Domain\Catalog\Enums\Station;
 use App\Domain\Catalog\Models\Category;
 use App\Domain\Catalog\Models\Product;
 use App\Domain\Catalog\Models\ProductVariant;
+use App\Domain\Inventory\Actions\DeductStockForServedItem;
+use App\Domain\Inventory\Actions\RecordStockMovement;
+use App\Domain\Inventory\DTO\RecordStockMovementData;
+use App\Domain\Inventory\Enums\IngredientBaseUnit;
+use App\Domain\Inventory\Enums\StockMovementRefType;
+use App\Domain\Inventory\Enums\StockMovementType;
+use App\Domain\Inventory\Models\Ingredient;
+use App\Domain\Inventory\Models\Recipe;
+use App\Domain\Inventory\Models\StockBalance;
 use App\Domain\Ordering\Actions\CancelOrderItem;
 use App\Domain\Ordering\Actions\OpenTableSession;
 use App\Domain\Ordering\Actions\PlaceOrder;
@@ -65,7 +74,7 @@ use Symfony\Component\Console\Command\Command as CommandAlias;
  */
 final class PosDemo extends Command
 {
-    protected $signature = 'pos:demo {--den=dong-ca : Mốc dừng lại — "ca", "ban", "goi-mon", "gui-bep", "tach-ban", "huy-mon", "thu-tien", "khuyen-mai", "sync" hoặc "dong-ca" (mặc định — chạy trọn vẹn)}';
+    protected $signature = 'pos:demo {--den=dong-ca : Mốc dừng lại — "ca", "ban", "goi-mon", "gui-bep", "tach-ban", "huy-mon", "thu-tien", "khuyen-mai", "sync", "tru-kho" hoặc "dong-ca" (mặc định — chạy trọn vẹn)}';
 
     protected $description = 'Diễn tập một ca bán hàng mẫu, dùng để tự kiểm tra bằng mắt (chỉ chạy ở môi trường local)';
 
@@ -92,7 +101,7 @@ final class PosDemo extends Command
         }
 
         $den = $this->option('den');
-        $cacMoc = ['ca', 'ban', 'goi-mon', 'gui-bep', 'tach-ban', 'huy-mon', 'thu-tien', 'khuyen-mai', 'sync', 'dong-ca'];
+        $cacMoc = ['ca', 'ban', 'goi-mon', 'gui-bep', 'tach-ban', 'huy-mon', 'thu-tien', 'khuyen-mai', 'sync', 'tru-kho', 'dong-ca'];
 
         if (! in_array($den, $cacMoc, true)) {
             $this->line("<fg=red>❌ Chưa hỗ trợ --den={$den}. Bước này chỉ hỗ trợ --den=".implode(', --den=', $cacMoc).'.</>');
@@ -112,6 +121,18 @@ final class PosDemo extends Command
 
                 $this->newLine();
                 $this->line('<fg=green;options=bold>✅ ĐỒNG BỘ CHẠY ĐÚNG</>');
+                $this->line('<fg=yellow>Đã dọn sạch toàn bộ dữ liệu diễn tập (rollback, không có gì được ghi thật vào database).</>');
+
+                DB::rollBack();
+
+                return CommandAlias::SUCCESS;
+            }
+
+            if ($den === 'tru-kho') {
+                $this->dienTapTruKho($moBan, $goiMon, $guiBep, $capNhatTrangThaiMon, $thuNgan, $ca);
+
+                $this->newLine();
+                $this->line('<fg=green;options=bold>✅ TRỪ KHO CHẠY ĐÚNG</>');
                 $this->line('<fg=yellow>Đã dọn sạch toàn bộ dữ liệu diễn tập (rollback, không có gì được ghi thật vào database).</>');
 
                 DB::rollBack();
@@ -305,7 +326,7 @@ final class PosDemo extends Command
 
         foreach ($phieux as $phieu) {
             foreach ($phieu->items as $dongMon) {
-                $capNhatTrangThaiMon->handle(new UpdateOrderItemStatusData(orderItemId: $dongMon->id));
+                $capNhatTrangThaiMon->handle(new UpdateOrderItemStatusData(orderItemId: $dongMon->id, updatedByUserId: $phieu->createdBy->id));
             }
 
             $phieu->refresh();
@@ -444,6 +465,113 @@ final class PosDemo extends Command
         $this->line("   Đếm thực tế trong két: {$demDuoc->format()}");
         $this->line("   Chênh lệch: {$chenhLech->format()}");
         $this->line("   Trạng thái ca: {$caDaDong->status->value}");
+    }
+
+    /**
+     * Diễn lại trừ kho theo định lượng (Phase 3 Bước 5):
+     *  - Món "Lẩu gà diễn tập" định lượng 2 nguyên liệu (gà, sả).
+     *  - Nhập tồn đầu qua RecordStockMovement (một cửa duy nhất ghi sổ cái).
+     *  - Gọi 2 phần, gửi bếp, bếp báo xong → trừ kho TỰ ĐỘNG trong cùng giao
+     *    dịch với served_at (không có bước bấm "trừ kho" riêng).
+     *  - In rõ tồn TRƯỚC và SAU khi phục vụ để chủ quán tự đối chiếu bằng mắt.
+     */
+    private function dienTapTruKho(
+        OpenTableSession $moBan,
+        PlaceOrder $goiMon,
+        SendToKitchen $guiBep,
+        UpdateOrderItemStatus $capNhatTrangThaiMon,
+        User $thuNgan,
+        Shift $ca,
+    ): void {
+        $this->mocHienTai = 'TRỪ KHO';
+        $this->newLine();
+        $this->line('<fg=cyan;options=bold>TRỪ KHO</>');
+
+        $ga = Ingredient::factory()->create([
+            'code' => 'DEMO-GA-TA',
+            'name' => 'Gà ta diễn tập',
+            'base_unit' => IngredientBaseUnit::Gram,
+        ]);
+        $sa = Ingredient::factory()->create([
+            'code' => 'DEMO-SA',
+            'name' => 'Sả diễn tập',
+            'base_unit' => IngredientBaseUnit::Gram,
+        ]);
+
+        $recordStockMovement = app(RecordStockMovement::class);
+        $recordStockMovement->handle(new RecordStockMovementData(
+            ingredientId: $ga->id,
+            type: StockMovementType::Purchase,
+            qtyDelta: 5_000,
+            knownCost: 500_000,
+            refType: StockMovementRefType::Manual,
+            refId: null,
+            reason: null,
+            approvedByUserId: null,
+            createdByUserId: $thuNgan->id,
+            shiftId: null,
+        ));
+        $recordStockMovement->handle(new RecordStockMovementData(
+            ingredientId: $sa->id,
+            type: StockMovementType::Purchase,
+            qtyDelta: 1_000,
+            knownCost: 30_000,
+            refType: StockMovementRefType::Manual,
+            refId: null,
+            reason: null,
+            approvedByUserId: null,
+            createdByUserId: $thuNgan->id,
+            shiftId: null,
+        ));
+
+        $nhomBep = Category::factory()->create(['name' => 'Lẩu diễn tập', 'station' => Station::Kitchen]);
+        $mon = Product::factory()->for($nhomBep)->create(['code' => 'DEMO-LAU-GA', 'name' => 'Lẩu gà diễn tập']);
+        $bienThe = ProductVariant::factory()->for($mon)->create(['name' => 'Phần', 'price' => 150_000, 'deducts_stock' => true]);
+
+        Recipe::factory()->for($bienThe, 'productVariant')->for($ga, 'ingredient')->create(['qty_base' => 300]);
+        Recipe::factory()->for($bienThe, 'productVariant')->for($sa, 'ingredient')->create(['qty_base' => 30]);
+
+        $ban = DiningTable::factory()->create(['code' => 'DEMO-TK', 'name' => 'Bàn diễn tập trừ kho']);
+        $luotKhach = $moBan->handle(new OpenTableSessionData(
+            uuid: (string) Str::uuid(),
+            diningTableIds: [$ban->id],
+            primaryDiningTableId: $ban->id,
+            guestCount: 4,
+            openedByUserId: $thuNgan->id,
+        ));
+
+        $soPhan = 2;
+        $phieu = $goiMon->handle(new PlaceOrderData(
+            uuid: (string) Str::uuid(),
+            tableSessionId: $luotKhach->id,
+            items: [new PlaceOrderItemData((string) Str::uuid(), $mon->id, $bienThe->id, $soPhan, null, [])],
+            note: null,
+            createdByUserId: $thuNgan->id,
+        ));
+        $this->line("   Gọi {$soPhan} phần {$mon->name}");
+
+        $tonGaTruoc = StockBalance::query()->find($ga->id)->qty;
+        $tonSaTruoc = StockBalance::query()->find($sa->id)->qty;
+        $this->line("   Tồn TRƯỚC khi phục vụ — gà: {$tonGaTruoc} g, sả: {$tonSaTruoc} g");
+
+        $guiBep->handle(new SendToKitchenData(orderId: $phieu->id));
+        foreach ($phieu->items as $dongMon) {
+            $capNhatTrangThaiMon->handle(new UpdateOrderItemStatusData(orderItemId: $dongMon->id, updatedByUserId: $thuNgan->id));
+        }
+        $this->line('   Bếp báo xong — trừ kho tự động trong cùng giao dịch với served_at');
+
+        $tonGaSau = StockBalance::query()->find($ga->id)->qty;
+        $tonSaSau = StockBalance::query()->find($sa->id)->qty;
+        $this->line("   Tồn SAU khi phục vụ — gà: {$tonGaSau} g (giảm ".($tonGaTruoc - $tonGaSau)." g), sả: {$tonSaSau} g (giảm ".($tonSaTruoc - $tonSaSau).' g)');
+
+        // Gọi lại lần hai cho cùng dòng món để chứng minh không trừ kho lần hai —
+        // handle() ở đây gọi trực tiếp Action trừ kho, không qua UpdateOrderItemStatus
+        // (đường đó đã tự chặn chuyển served → served ở StatusTransition).
+        app(DeductStockForServedItem::class)
+            ->handle($phieu->items()->sole()->refresh(), $thuNgan->id, $ca->id);
+
+        $tonGaLanHai = StockBalance::query()->find($ga->id)->qty;
+        $this->line("   Gọi lại trừ kho lần hai cho cùng dòng món — tồn gà vẫn {$tonGaLanHai} g (không trừ thêm)");
     }
 
     /**

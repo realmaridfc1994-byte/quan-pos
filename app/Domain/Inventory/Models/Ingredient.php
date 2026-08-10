@@ -9,6 +9,7 @@ use Database\Factories\IngredientFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 final class Ingredient extends Model
 {
@@ -42,5 +43,11 @@ final class Ingredient extends Model
     public function units(): HasMany
     {
         return $this->hasMany(IngredientUnit::class);
+    }
+
+    /** @return HasOne<StockBalance, $this> */
+    public function stockBalance(): HasOne
+    {
+        return $this->hasOne(StockBalance::class);
     }
 }

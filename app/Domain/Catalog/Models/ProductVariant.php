@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Domain\Catalog\Models;
 
+use App\Domain\Inventory\Models\Recipe;
 use Database\Factories\ProductVariantFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 final class ProductVariant extends Model
 {
@@ -29,6 +31,7 @@ final class ProductVariant extends Model
         'tracks_inventory',
         'stock_unit',
         'stock_factor',
+        'deducts_stock',
     ];
 
     protected function casts(): array
@@ -40,6 +43,7 @@ final class ProductVariant extends Model
             'sort_order' => 'integer',
             'tracks_inventory' => 'boolean',
             'stock_factor' => 'integer',
+            'deducts_stock' => 'boolean',
         ];
     }
 
@@ -47,5 +51,11 @@ final class ProductVariant extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    /** @return HasMany<Recipe, $this> */
+    public function recipes(): HasMany
+    {
+        return $this->hasMany(Recipe::class);
     }
 }

@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\MenuController;
 use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\OrderItemController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\PurchaseController;
 use App\Http\Controllers\Api\ShiftController;
 use App\Http\Controllers\Api\SyncBatchController;
 use App\Http\Controllers\Api\SyncConflictController;
@@ -62,6 +63,15 @@ Route::prefix('v1')->group(function (): void {
 
         Route::prefix('payments')->group(function (): void {
             Route::post('{payment}/void', [PaymentController::class, 'void'])->middleware('idempotent');
+        });
+
+        Route::prefix('purchases')->group(function (): void {
+            Route::get('/', [PurchaseController::class, 'index']);
+            Route::post('/', [PurchaseController::class, 'store'])->middleware('idempotent');
+            Route::get('{purchase}', [PurchaseController::class, 'show']);
+            Route::patch('{purchase}', [PurchaseController::class, 'update'])->middleware('idempotent');
+            Route::post('{purchase}/receive', [PurchaseController::class, 'receive'])->middleware('idempotent');
+            Route::post('{purchase}/cancel', [PurchaseController::class, 'cancel'])->middleware('idempotent');
         });
 
         Route::prefix('orders')->group(function (): void {
