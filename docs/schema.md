@@ -1934,7 +1934,7 @@ CREATE TABLE stock_reconciliation_notes (
 
 | Mã | Nội dung | Ai giữ |
 |---|---|---|
-| **K1** | Sổ cái không bao giờ sửa hay xoá dòng cũ | Code + kiểm tra Bước 9 |
+| **K1** | Sổ cái không bao giờ sửa hay xoá dòng cũ | **DB** `trg_stock_movements_no_update` (chặn SỬA) + code (chặn cả sửa lẫn xoá) + kiểm tra Bước 9 |
 | **K2** | Với mọi nguyên liệu: cộng hết `qty_delta` trong sổ cái = `qty` trong bảng tồn | Job Bước 9 |
 | **K3** | Cộng hết `cost_delta` trong sổ cái = `total_cost` trong bảng tồn | Job Bước 9 |
 | **K4** | Ghi sổ cái và cập nhật tồn luôn trong cùng một giao dịch | Code |
@@ -1951,6 +1951,21 @@ CREATE TABLE stock_reconciliation_notes (
 | **K15** | Hàng hỏng vỡ bắt buộc ghi lý do | **DB** `ck_stock_movements_waste_reason` |
 | **K16** | Ghi hai lần cùng một mã vân tay chỉ ra một dòng sổ cái | **DB** `uq_stock_movements_uuid` + code |
 | **K17** | Một dòng sổ cái mồ côi chỉ được xác nhận "đã xem" đúng một lần, và phải đủ ai/khi nào/vì sao | **DB** `uq_srn_one_note_per_movement`, `ck_srn_reason` + code |
+
+**K1 được giữ bằng HAI lớp, không phải một** (thêm ngày 12/08, Phase 3 Bước 10). Chốt ở tầng Model chỉ bắt được code đi qua Eloquent; một câu `DB::table('stock_movements')->update(...)` hay một dòng SQL gõ tay trong phpMyAdmin đi vòng qua nó. Nên có thêm trigger ở tầng database:
+
+```sql
+CREATE TRIGGER trg_stock_movements_no_update BEFORE UPDATE ON stock_movements
+FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'stock_movements la so cai chi ghi them, khong duoc sua. Ghi sai thi ghi them dong bu tru.';
+END
+```
+
+Trigger chỉ chặn UPDATE — INSERT là việc của `RecordStockMovement`, còn xoá đã bị chặn ở tầng Model và bị các khoá ngoại trỏ vào sổ cái chặn phần lớn. Câu thông báo cố ý viết không dấu: nó nằm trong định nghĩa trigger, không phải trong bảng dữ liệu, nên không chắc đi qua được mọi bảng mã trên đường từ MariaDB ra màn hình.
+
+**Hệ quả đã cân nhắc:** sau trigger này không còn đường nào vá tay một cột trên sổ cái, kể cả lệnh `stock:backfill-uuid`. Chấp nhận có chủ đích — migration `2026_08_11_000002` đã siết `uuid NOT NULL` nên không thể còn dòng nào cần vá; nếu tương lai thật sự cần sửa thì đó phải là một quyết định có ý thức (tạm gỡ trigger), không phải một câu UPDATE lỡ tay.
 
 **K5 và K7 là hai bất biến quan trọng nhất.** Chúng chặn trừ kho hai lần — lỗi kho nguy hiểm nhất, vì nó không báo gì và chỉ lộ ra khi kiểm kê ba tháng sau.
 

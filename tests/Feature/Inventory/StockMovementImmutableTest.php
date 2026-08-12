@@ -111,14 +111,9 @@ it('lệnh vá uuid cho dòng cũ vẫn chạy được dù sổ cái đã khoá
     $this->artisan('stock:backfill-uuid')->assertSuccessful();
 });
 
-it('chốt chặn nằm ở tầng Eloquent — ghi thẳng qua tầng truy vấn vẫn qua được', function () {
-    $movement = ghiMotDongSoCai();
-
-    // Đây KHÔNG phải lỗ hổng bị bỏ quên mà là ranh giới đã biết, và là đường
-    // mà lệnh stock:backfill-uuid cố tình đi. Ghi lại thành test để ai đọc
-    // cũng biết chốt chặn này bảo vệ tới đâu: nó chặn code nghiệp vụ viết
-    // nhầm, KHÔNG chặn được người gõ SQL tay vào database.
-    DB::table('stock_movements')->where('id', $movement->id)->update(['reason' => 'vá tay']);
-
-    expect(DB::table('stock_movements')->where('id', $movement->id)->value('reason'))->toBe('vá tay');
-});
+// Ở đây từng có một test khẳng định "ghi thẳng qua DB::table() vẫn qua được",
+// ghi lại ranh giới của chốt chặn tầng Model. Khẳng định đó KHÔNG CÒN ĐÚNG từ
+// 12/08: migration 2026_08_12_000002 thêm trigger trg_stock_movements_no_update
+// bịt luôn đường đó ở tầng database. Test thay thế nằm ở
+// tests/Feature/Inventory/StockMovementDbTriggerTest.php — hai file gác hai
+// lớp khác nhau, không trùng nhau.

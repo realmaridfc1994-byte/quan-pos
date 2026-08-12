@@ -33,6 +33,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *
  * (Chặn xoá có từ Bước 6; chặn sửa thêm ở Bước 10 sau review mục 8.2-H —
  * K1 nói "không bao giờ sửa" nhưng chỉ có nửa xoá được khoá.)
+ *
+ * CÒN MỘT LỚP NỮA BÊN DƯỚI. Chốt ở đây chỉ bắt được code đi qua Eloquent;
+ * `DB::table()->update()` hay SQL gõ tay thì đi vòng qua nó. Nên từ 12/08 có
+ * thêm trigger `trg_stock_movements_no_update` ở tầng database (migration
+ * 2026_08_12_000002) chặn MỌI câu UPDATE, không ai đi vòng được. Hai lớp
+ * không thừa nhau: lớp này báo lỗi sớm và rõ nghĩa cho người viết code, lớp
+ * kia là chốt cuối cùng cho dữ liệu.
  */
 final class StockMovement extends Model
 {
