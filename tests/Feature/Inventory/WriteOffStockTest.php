@@ -101,9 +101,38 @@ it('ghi hao hụt loại DÙNG NỘI BỘ trừ đúng số lượng', function 
 
 it('bắt buộc ghi rõ lý do, không cho ghi qua loa (chuỗi rỗng)', function () {
     expect(fn () => ghiHaoHut($this->action, $this->ingredient, $this->chuQuan, WasteReasonCategory::Broken, '   '))
-        ->toThrow(DomainException::class, 'Phải ghi rõ lý do hao hụt.');
+        ->toThrow(DomainException::class, 'Phải ghi rõ lý do hao hụt');
 
     expect(StockMovement::query()->count())->toBe(1); // chỉ dòng nhập tồn đầu ở beforeEach
+});
+
+/**
+ * BUG CŨ (review Phase 3 mục 8.2-L): ràng buộc database đòi reason ≥ 5 ký tự,
+ * nhưng code chỉ chặn chuỗi rỗng. Lý do "Vỡ" hai ký tự vẫn ghi được, và vẫn
+ * qua được database CHỈ NHỜ tiền tố "[Vỡ/hỏng] " kéo dài chuỗi lên — an toàn
+ * nhờ may mắn về độ dài, không nhờ thiết kế.
+ */
+it('lý do ngắn hơn 5 ký tự bị chặn ở tầng code, không lọt xuống nhờ tiền tố', function (string $lyDoNgan) {
+    expect(fn () => ghiHaoHut($this->action, $this->ingredient, $this->chuQuan, WasteReasonCategory::Broken, $lyDoNgan))
+        ->toThrow(DomainException::class, 'ít nhất 5 ký tự');
+
+    expect(StockMovement::query()->count())->toBe(1);
+})->with(['x', 'Vỡ', 'Vỡ 1', '  Vỡ  ']);
+
+it('đúng 5 ký tự thì ghi được — ngưỡng tính từ mức đó trở lên', function () {
+    $movement = ghiHaoHut($this->action, $this->ingredient, $this->chuQuan, WasteReasonCategory::Broken, 'Vỡ 5c');
+
+    expect($movement->reason)->toBe('[Vỡ/hỏng] Vỡ 5c');
+});
+
+it('chốt chặn đo phần người dùng gõ, không đo chuỗi đã ghép tiền tố', function () {
+    // Tiền tố "[Vỡ/hỏng] " dài 10 ký tự. Nếu code đo trên chuỗi đã ghép thì
+    // lý do 1 ký tự cũng qua (11 ≥ 5) — đúng cái bẫy cũ.
+    $tienTo = '[Vỡ/hỏng] ';
+    expect(mb_strlen($tienTo))->toBeGreaterThan(5);
+
+    expect(fn () => ghiHaoHut($this->action, $this->ingredient, $this->chuQuan, WasteReasonCategory::Broken, 'x'))
+        ->toThrow(DomainException::class);
 });
 
 it('số lượng hao hụt phải lớn hơn 0', function () {

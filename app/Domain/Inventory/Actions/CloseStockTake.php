@@ -11,6 +11,7 @@ use App\Domain\Inventory\Enums\StockMovementType;
 use App\Domain\Inventory\Enums\StockTakeStatus;
 use App\Domain\Inventory\Models\StockTake;
 use App\Exceptions\DomainException;
+use App\Support\StockMovementUuid;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -47,9 +48,15 @@ final class CloseStockTake
                 ->orderBy('ingredient_id')
                 ->get();
 
+            // Cộng dồn bằng số nguyên trần, KHÔNG qua App\Support\Money — đây
+            // là ngoại lệ duy nhất của CLAUDE.md mục 8, đã ghi thành luật ở đó
+            // (12/08). Lý do: cost_delta là chênh lệch CÓ DẤU (kiểm kê thiếu ra
+            // số âm), còn Money chặn số âm theo đúng thiết kế của nó. Ép qua
+            // Money sẽ nổ lỗi ở đúng trường hợp bình thường nhất.
             $tongChenhLech = 0;
             foreach ($dongLech as $dong) {
                 $movement = $this->recordStockMovement->handle(new RecordStockMovementData(
+                    uuid: StockMovementUuid::tuChungTu(StockMovementRefType::StockTakeItem, $dong->id, $dong->ingredient_id),
                     ingredientId: $dong->ingredient_id,
                     type: StockMovementType::Stocktake,
                     qtyDelta: $dong->diff_qty,

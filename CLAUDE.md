@@ -25,7 +25,7 @@ Phase 1 (đang làm) là bán hàng và đối soát ca. Phase 3 sẽ là trừ 
 |---|---|---|
 | PHP | 8.2 | Bắt buộc `declare(strict_types=1);` ở đầu mọi file PHP tự viết. Chốt theo PHP thật có trên máy dev (XAMPP), không dùng Sail |
 | Laravel | 12.x | Cấu hình ở `bootstrap/app.php`, không phải `app/Http/Kernel.php` |
-| MySQL | 8.4 (đã kiểm chứng trên 8.4.11) | InnoDB, `utf8mb4_0900_ai_ci`. Cần MySQL 8 cho generated column + CHECK constraint |
+| MariaDB | 10.4.32 (đi kèm XAMPP 8.2.12) | InnoDB, `utf8mb4` / `utf8mb4_unicode_ci`, cổng 3306. Driver trong `.env` phải là **`mariadb`**, KHÔNG phải `mysql` — Laravel 11+ có driver riêng cho MariaDB. Schema thiết kế trên MySQL 8.4.11 rồi chuyển sang MariaDB, đã kiểm chứng lại ngày 31/07 (4 phép thử, cả 4 đạt — phụ lục cuối `docs/schema.md`). Generated column + CHECK constraint chạy đúng trên bản này |
 | Pest | 3.x | Framework test duy nhất. Không viết test kiểu PHPUnit class. Chốt bản 3.x vì Pest 4 cần PHP ≥ 8.3, máy dev đang PHP 8.2 |
 | Laravel Pint | 1.x | Format code duy nhất. Không dùng php-cs-fixer/ecs riêng |
 | Larastan / PHPStan | level 6 | Nếu chưa cài thì hỏi trước khi cài |
@@ -147,6 +147,12 @@ Món hàng nào không rõ thuộc nhóm nào thì hỏi, đừng tự đoán.
 16. **Mọi khoá ngoại là `ON DELETE RESTRICT`.** Không `CASCADE`, không `SET NULL`.
 17. **Trạng thái luôn là PHP Enum backed by string**, cast trong Model. Không so sánh chuỗi trần `=== 'open'` rải rác trong code.
 18. **Giữ chỗ nhiều bàn thì luôn khoá theo `dining_table_id` tăng dần** — đây là quy tắc chống kẹt chéo (deadlock) đã chốt ở `docs/schema.md` Phần 6. Không có ngoại lệ.
+
+> **Bổ sung 12/08 — Phase 3 Bước 10, hai ngoại lệ được ghi thành luật (review mục 8.2-U và 8.2-L). Cả hai đã đúng sẵn trong code; ghi ra đây để lần sau không ai "sửa cho đúng luật" mà làm hỏng.**
+>
+> **NGOẠI LỆ DUY NHẤT của luật số 8 (mọi phép tính tiền đi qua `Money`): cột `cost_delta` và `total_diff_cost` của nhóm kho.** Hai cột này là **chênh lệch CÓ DẤU**, không phải số tiền: kiểm kê thiếu ra số âm, kiểm kê thừa ra số dương, và tổng của một phiếu kiểm kê hoàn toàn có thể âm. `Money` chặn số âm theo đúng thiết kế của nó, nên ép chúng qua `Money` sẽ nổ lỗi ở đúng những trường hợp bình thường nhất. Vì vậy `CloseStockTake` cộng dồn bằng `+=` trần trên `int`, và đó là cách làm ĐÚNG ở đây. Ngoại lệ này chỉ áp dụng cho hai cột đó; mọi số tiền còn lại — kể cả `total_cost`, `line_cost`, `cost_after` — vẫn phải đi qua `Money`. (Ranh giới dễ nhớ: cột nào có thể mang dấu trừ thì không phải `Money`.)
+>
+> **Ràng buộc độ dài lý do đếm trên PHẦN NGƯỜI DÙNG GÕ, không trên chuỗi đã ghép tiền tố.** `ck_stock_movements_waste_reason` đòi `reason` dài ≥ 5 ký tự (K15), nhưng `WriteOffStock` ghép thêm tiền tố `[Vỡ/hỏng] ` trước khi ghi. Có một quãng dài code chỉ chặn chuỗi rỗng, và lý do "x" một ký tự vẫn qua được database **chỉ nhờ tiền tố đủ dài** — an toàn nhờ may mắn, không nhờ thiết kế; đổi tên loại hao hụt cho ngắn lại là ràng buộc nổ lỗi database thô trước mặt thu ngân. Luật: **khi ràng buộc database đặt trên một cột mà code ghép thêm tiền tố/hậu tố vào, phần kiểm tra ở tầng code phải đo đúng phần người dùng nhập.**
 
 **Schema chỉ có MỘT nguồn chân lý: `docs/schema.md`, và migration là bản thực thi của nó. Không tạo thêm file SQL dựng sẵn ở bất kỳ đâu — file không ai chạy là file sẽ lệch mà không ai biết.** (Dự án từng có `docker/mysql/init/*.sql` làm nguồn thứ hai, lệch 13 bảng so với schema thật vì không ai chạy nó — đã xoá cả thư mục `docker/` ngày 06/08. Dựng môi trường từ đầu dùng đúng một lệnh: `php artisan migrate:fresh --seed`.)
 
@@ -801,16 +807,23 @@ php artisan tinker                    # Thử câu lệnh trực tiếp
 php artisan about                     # Phiên bản, cấu hình đang dùng
 ```
 
-Kết nối MySQL trong `.env`:
+Kết nối MariaDB trong `.env` (MariaDB 10.4.32 đi kèm XAMPP 8.2.12):
 
 ```dotenv
-DB_CONNECTION=mysql
+DB_CONNECTION=mariadb
 DB_HOST=127.0.0.1
-DB_PORT=3307
+DB_PORT=3306
 DB_DATABASE=quan_pos
-DB_USERNAME=quanpos
-DB_PASSWORD=quanpos_secret
+DB_USERNAME=root
+DB_PASSWORD=
+DB_CHARSET=utf8mb4
+DB_COLLATION=utf8mb4_unicode_ci
 ```
+
+**`DB_CONNECTION` phải là `mariadb`, không phải `mysql`.** Laravel 11 trở lên có driver
+riêng cho MariaDB; để `mysql` thì Laravel sinh SQL theo phương ngữ MySQL 8 và một số
+chỗ (cột tự tính, kiểu dữ liệu) không khớp. Điều này đã bị ghi sai bốn lần qua ba phase,
+nên giờ có `tests/Feature/Support/DatabaseDriverTest.php` gác — ai đổi driver là test đỏ.
 
 ---
 
@@ -821,7 +834,7 @@ Những việc dưới đây **Claude Code không được tự ý làm**. Gặp
 ### Về schema và migration
 
 1. **Không sửa file migration đã chạy trên production.** Đã chạy rồi thì sửa file đó vô nghĩa và nguy hiểm. Cần đổi thì tạo migration mới.
-2. **Không đổi schema mà không hỏi** — thêm/xoá/đổi tên bảng, cột, index, ràng buộc, enum. Schema đã được thiết kế, kiểm chứng thật trên MySQL 8.4.11 và ghi thành tài liệu. Muốn đổi thì trình bày lý do trước, được đồng ý mới làm, và **cập nhật đồng thời cả hai nơi**: `docs/schema.md`, `database/migrations/`.
+2. **Không đổi schema mà không hỏi** — thêm/xoá/đổi tên bảng, cột, index, ràng buộc, enum. Schema đã được thiết kế, kiểm chứng thật trên MySQL 8.4.11 và ghi thành tài liệu, và đã kiểm chứng lại trên MariaDB 10.4.32 ngày 31/07 bằng 4 phép thử, cả 4 đạt — xem phụ lục kiểm chứng trong `docs/schema.md`. Muốn đổi thì trình bày lý do trước, được đồng ý mới làm, và **cập nhật đồng thời cả hai nơi**: `docs/schema.md`, `database/migrations/`.
 3. **Không chạy `php artisan migrate:fresh`, `migrate:refresh`, `migrate:rollback`, `db:wipe` trên bất kỳ database nào không phải máy dev của chính mình.**
 4. **Không bỏ ràng buộc CHECK, khoá UNIQUE hay khoá ngoại cho "code chạy được".** Test đỏ vì vướng ràng buộc nghĩa là code sai, không phải ràng buộc sai. Đặc biệt không được đụng tới `uq_tst_one_session_per_table` và `uq_shifts_only_one_open` — đó là hai chốt chặn quan trọng nhất hệ thống.
 5. **Không đụng vào ba cột chừa cho Phase 3** (`tracks_inventory`, `stock_unit`, `stock_factor`) và không tạo bảng kho (`ingredients`, `recipes`, `stock_entries`) trước khi Phase 3 chính thức bắt đầu.
