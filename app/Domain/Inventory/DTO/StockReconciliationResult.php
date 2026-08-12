@@ -16,7 +16,11 @@ final readonly class StockReconciliationResult
      * @param  list<array{stock_movement_id: int, ref_id: ?int}>  $soCaiMoCoi
      * @param  list<array{ingredient_id: int, ingredient_name: string, so_dong: int}>  $thieuGiaVon
      * @param  list<array{order_item_id: int, product_name: string, variant_name: string, table_session_code: string, closed_at: string}>  $quenBamXong
-     * @param  list<array{stock_movement_id: int, ref_id: ?int, note: string, reason: string, acknowledged_by: string, acknowledged_at: string}>  $moCoiDaGhiChu
+     * @param  list<array{stock_movement_id: int, ref_id: ?int, nguon: string, note: string, reason: string, acknowledged_by: string, acknowledged_at: string}>  $moCoiDaGhiChu
+     * @param  list<array{purchase_item_id: int, purchase_id: int, purchase_code: string, ingredient_name: string, received_at: string}>  $thieuSoCaiNhapHang
+     * @param  list<array{stock_movement_id: int, ref_id: ?int, nguon: string}>  $moCoiNhapHang
+     * @param  list<array{stock_take_item_id: int, stock_take_id: int, ingredient_name: string, diff_qty: int, closed_at: string}>  $thieuSoCaiKiemKe
+     * @param  list<array{stock_movement_id: int, ref_id: ?int, nguon: string}>  $moCoiKiemKe
      */
     public function __construct(
         public array $lechQty,
@@ -26,6 +30,10 @@ final readonly class StockReconciliationResult
         public array $thieuGiaVon = [],
         public array $quenBamXong = [],
         public array $moCoiDaGhiChu = [],
+        public array $thieuSoCaiNhapHang = [],
+        public array $moCoiNhapHang = [],
+        public array $thieuSoCaiKiemKe = [],
+        public array $moCoiKiemKe = [],
     ) {}
 
     /**
@@ -39,7 +47,14 @@ final readonly class StockReconciliationResult
      */
     public function sach(): bool
     {
-        return $this->lechQty === [] && $this->lechCost === [] && $this->thieuSoCai === [] && $this->soCaiMoCoi === [];
+        return $this->lechQty === []
+            && $this->lechCost === []
+            && $this->thieuSoCai === []
+            && $this->soCaiMoCoi === []
+            && $this->thieuSoCaiNhapHang === []
+            && $this->moCoiNhapHang === []
+            && $this->thieuSoCaiKiemKe === []
+            && $this->moCoiKiemKe === [];
     }
 
     /** Có gì cần chủ quán dọn không — khác với "sổ sách có lệch không". */
@@ -60,6 +75,10 @@ final readonly class StockReconciliationResult
             'thieu_gia_von' => $this->thieuGiaVon,
             'quen_bam_xong' => $this->quenBamXong,
             'mo_coi_da_ghi_chu' => $this->moCoiDaGhiChu,
+            'thieu_so_cai_nhap_hang' => $this->thieuSoCaiNhapHang,
+            'mo_coi_nhap_hang' => $this->moCoiNhapHang,
+            'thieu_so_cai_kiem_ke' => $this->thieuSoCaiKiemKe,
+            'mo_coi_kiem_ke' => $this->moCoiKiemKe,
         ];
     }
 }

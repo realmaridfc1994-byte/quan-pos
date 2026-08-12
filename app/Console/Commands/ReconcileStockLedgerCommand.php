@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Domain\Inventory\Actions\ReconcileStockLedger;
 use App\Domain\Inventory\DTO\StockReconciliationResult;
+use App\Domain\Inventory\Enums\StockMovementRefType;
 use App\Support\Money;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -32,7 +33,7 @@ final class ReconcileStockLedgerCommand extends Command
 
         $this->newLine();
         $this->line('<fg=cyan;options=bold>ĐỐI SOÁT SỔ CÁI KHO</>');
-        $this->line("Đối chiếu dòng món phục vụ từ {$tuNgay->toDateString()} đến {$denNgay->toDateString()} (mục 1, 2 luôn kiểm toàn bộ lịch sử).");
+        $this->line("Đối chiếu chứng từ từ {$tuNgay->toDateString()} đến {$denNgay->toDateString()} (mục 1, 2 luôn kiểm toàn bộ lịch sử).");
         $this->newLine();
 
         $this->inMucSoLuong($ketQua);
@@ -40,6 +41,8 @@ final class ReconcileStockLedgerCommand extends Command
         $this->inMucServedAt($ketQua);
         $this->inMucThieuGiaVon($ketQua);
         $this->inMucQuenBamXong($ketQua);
+        $this->inMucNhapHang($ketQua);
+        $this->inMucKiemKe($ketQua);
 
         $this->newLine();
         if ($ketQua->sach()) {
@@ -118,14 +121,86 @@ final class ReconcileStockLedgerCommand extends Command
             $this->line('   <fg=gray>Xem xong mà thấy không phải lỗi thì chạy: php artisan stock:ghi-chu-mo-coi &lt;số hiệu&gt; --ghi-chu="..." --ly-do="..."</>');
         }
 
-        // Vẫn LIỆT KÊ đầy đủ, nhưng không đếm vào số lỗi và không làm lệnh
-        // trả về mã lỗi — xem AcknowledgeOrphanMovement.
-        if ($ketQua->moCoiDaGhiChu !== []) {
-            $this->line('   ✔️  '.count($ketQua->moCoiDaGhiChu).' dòng sổ cái mồ côi ĐÃ XEM (không tính vào số lỗi):');
-            foreach ($ketQua->moCoiDaGhiChu as $dong) {
-                $this->line("      - Sổ cái #{$dong['stock_movement_id']} → order_item #{$dong['ref_id']}");
-                $this->line("        {$dong['acknowledged_by']} xác nhận lúc {$dong['acknowledged_at']}: {$dong['reason']}");
+        $this->inMoCoiDaGhiChu($ketQua, StockMovementRefType::OrderItem, 'order_item');
+    }
+
+    /**
+     * Mục 6 — NHẬP HÀNG: phiếu đã nhận ↔ dòng sổ cái. Cùng cấu trúc và cùng
+     * ảnh hưởng tới mã lỗi như mục 3.
+     */
+    private function inMucNhapHang(StockReconciliationResult $ketQua): void
+    {
+        $this->newLine();
+        $this->line('<options=bold>6. Dòng phiếu nhập đã nhận ↔ dòng sổ cái</>');
+
+        if ($ketQua->thieuSoCaiNhapHang === [] && $ketQua->moCoiNhapHang === []) {
+            $this->line('   ✅ Mọi dòng hàng đã nhận đều có sổ cái tương ứng, không có dòng sổ cái mồ côi.');
+        }
+
+        if ($ketQua->thieuSoCaiNhapHang !== []) {
+            $this->line('   ❌ '.count($ketQua->thieuSoCaiNhapHang).' dòng hàng ĐÃ NHẬN nhưng THIẾU sổ cái:');
+            foreach ($ketQua->thieuSoCaiNhapHang as $dong) {
+                $this->line("      - Phiếu {$dong['purchase_code']}, dòng #{$dong['purchase_item_id']} ({$dong['ingredient_name']}), nhận lúc {$dong['received_at']}");
             }
+        }
+
+        if ($ketQua->moCoiNhapHang !== []) {
+            $this->line('   ❌ '.count($ketQua->moCoiNhapHang).' dòng sổ cái MỒ CÔI (trỏ về dòng phiếu nhập không còn ở trạng thái đã nhận):');
+            foreach ($ketQua->moCoiNhapHang as $dong) {
+                $this->line("      - Sổ cái #{$dong['stock_movement_id']} → purchase_item #{$dong['ref_id']}");
+            }
+        }
+
+        $this->inMoCoiDaGhiChu($ketQua, StockMovementRefType::PurchaseItem, 'purchase_item');
+    }
+
+    /**
+     * Mục 7 — KIỂM KÊ: dòng lệch của phiếu đã chốt ↔ dòng sổ cái điều chỉnh.
+     * Dòng chưa đếm và dòng khớp KHÔNG sinh sổ cái nên không nằm ở đây.
+     */
+    private function inMucKiemKe(StockReconciliationResult $ketQua): void
+    {
+        $this->newLine();
+        $this->line('<options=bold>7. Dòng kiểm kê lệch đã chốt ↔ dòng sổ cái</>');
+
+        if ($ketQua->thieuSoCaiKiemKe === [] && $ketQua->moCoiKiemKe === []) {
+            $this->line('   ✅ Mọi chênh lệch kiểm kê đã chốt đều có sổ cái tương ứng, không có dòng sổ cái mồ côi.');
+        }
+
+        if ($ketQua->thieuSoCaiKiemKe !== []) {
+            $this->line('   ❌ '.count($ketQua->thieuSoCaiKiemKe).' dòng kiểm kê LỆCH đã chốt nhưng THIẾU sổ cái:');
+            foreach ($ketQua->thieuSoCaiKiemKe as $dong) {
+                $this->line("      - Phiếu kiểm kê #{$dong['stock_take_id']}, dòng #{$dong['stock_take_item_id']} ({$dong['ingredient_name']}), lệch {$dong['diff_qty']}, chốt lúc {$dong['closed_at']}");
+            }
+        }
+
+        if ($ketQua->moCoiKiemKe !== []) {
+            $this->line('   ❌ '.count($ketQua->moCoiKiemKe).' dòng sổ cái MỒ CÔI (trỏ về dòng kiểm kê chưa chốt, không lệch, hoặc chưa đếm):');
+            foreach ($ketQua->moCoiKiemKe as $dong) {
+                $this->line("      - Sổ cái #{$dong['stock_movement_id']} → stock_take_item #{$dong['ref_id']}");
+            }
+        }
+
+        $this->inMoCoiDaGhiChu($ketQua, StockMovementRefType::StockTakeItem, 'stock_take_item');
+    }
+
+    /**
+     * Dòng mồ côi ĐÃ có người xem và xác nhận: vẫn LIỆT KÊ đầy đủ, nhưng không
+     * đếm vào số lỗi và không làm lệnh trả về mã lỗi — xem
+     * AcknowledgeOrphanMovement.
+     */
+    private function inMoCoiDaGhiChu(StockReconciliationResult $ketQua, StockMovementRefType $nguon, string $tenChungTu): void
+    {
+        $cuaMuc = array_filter($ketQua->moCoiDaGhiChu, fn ($dong) => $dong['nguon'] === $nguon->value);
+
+        if ($cuaMuc === []) {
+            return;
+        }
+
+        $this->line('   ✔️  '.count($cuaMuc).' dòng sổ cái mồ côi ĐÃ XEM (không tính vào số lỗi):');
+        foreach ($cuaMuc as $dong) {
+            $this->line("      - Sổ cái #{$dong['stock_movement_id']} → {$tenChungTu} #{$dong['ref_id']}");
+            $this->line("        {$dong['acknowledged_by']} xác nhận lúc {$dong['acknowledged_at']}: {$dong['reason']}");
         }
     }
 
