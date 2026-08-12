@@ -1,55 +1,77 @@
 # PHASE.md — BƯỚC DUY NHẤT ĐANG ĐƯỢC PHÉP LÀM
 
-> Đặt tại `docs/PHASE.md`, ghi đè bản Phase 2.
-> **Chỉ chủ dự án được sửa file này.** Claude Code đọc, không ghi.
+> Đặt tại `docs/PHASE.md`, ghi đè bản Phase 4.
+> **Chỉ chủ dự án được sửa file này.** Claude Code đọc, không ghi — sửa lần này là NGOẠI LỆ, làm theo yêu cầu trực tiếp của chủ dự án ngày 12/08/2026 để chỉnh lại số hiệu bước.
 
 ```
-PHASE = 3
-BUOC_DANG_MO = 9
+PHASE = 4
+BUOC_DANG_MO = 4A.3, 4B.0
 ```
 
-**Phase 3 — Kho và lợi nhuận. Bước 10 — Opus review toàn phase.**
-Được phép: sửa những lỗi Opus đã chỉ ra trong báo cáo review, kèm test chứng minh. Nghiệm thu: hết mục 🔴.
+# BẢN ĐỒ PHASE 4
 
-**Mọi việc KHÔNG nằm trong báo cáo review: DỪNG và hỏi.**
+## P4-4A.1 — Nền khách hàng — ĐÃ ĐÓNG (12/08/2026)
 
----
+Bảng `customers` đã tạo và commit (221e497). Sổ cái điểm thưởng tách ra thành P4-4A.2 riêng (xem dưới).
 
-## Tiêu chí Phase 3
+## P4-4A.2 — Sổ cái điểm thưởng (tích điểm) — HOÃN, XOÁ KHỎI BẢN ĐỒ PHASE 4
 
-**Biết chính xác món nào lãi bao nhiêu, và hao hụt mỗi tháng là bao nhiêu.**
+Không tính vào các bước đang mở. Chi tiết chính sách chưa chốt và quyết định kiến trúc đã chốt: `docs/viec-ton.md` mục "Tích điểm thành viên — HOÃN (12/08/2026)". Code tham khảo giữ nguyên trên branch `park/loyalty-4a1`, không hợp nhất vào `master`.
 
----
+## P4-4A.3 — Đặt bàn
 
-## Bảng tra — việc nào thuộc bước nào
+**Đổi số hiệu ngày 12/08/2026: trước đây gọi nhầm là 4A.2 (số đó thuộc về sổ cái điểm thưởng, xem trên) — đúng ra là 4A.3.** Một commit đã lỡ ghi "P4-4A.2" trong message (06c8502, chỉ sửa `CLAUDE.md` mục 11) — không amend lại, chỉ sửa số hiệu từ đây trở đi.
 
-| Bước | Được làm gì | Nghiệm thu |
-|---|---|---|
-| 0 | Kiểm toán chuẩn bị kho — CHỈ BÁO CÁO | Có `docs/kiem-toan-kho.md` |
-| 1 | Schema kho: 9 bảng + bất biến nhóm K | Opus duyệt thiết kế |
-| 2 | Nguyên liệu, đơn vị, quy đổi nhiều cấp | Nhập được 60 nguyên liệu qua trình duyệt |
-| 3 | Định lượng món (BOM) | Xem được 1 lẩu gà ăn hết những gì |
-| 4 | Nhập hàng + giá vốn bình quân gia quyền | Nhập 2 lô giá khác nhau, giá vốn đúng |
-| 5 | Trừ kho tự động khi món được phục vụ | `pos:demo --den=tru-kho` |
-| 6 | Hao hụt, hủy hàng, điều chỉnh | Ghi được 5 lon bia vỡ |
-| 7 | Kiểm kê và xử lý chênh lệch | Kiểm kê một vòng, chốt được |
-| 8 | Báo cáo lãi gộp theo món, theo ngày | Biết lẩu gà lãi bao nhiêu phần trăm |
-| 9 | Job đối soát sổ cái và tồn kho | Cố tình làm lệch, job phát hiện được |
-| 10 | Opus review toàn phase | Hết mục 🔴 |
+Trạng thái: ĐANG REVIEW, CHƯA COMMIT — chờ chủ dự án duyệt riêng batch này (tách khỏi P4-4B.0)
 
-## Bước đã đóng
+### Trong phạm vi
+- Bảng `reservations` (trạng thái pending/confirmed/seated/no_show/cancelled)
+- Tiền cọc dùng lại sổ `payments` đã có (thêm `reservation_id`, `table_session_id` nullable)
+- `CreateReservation`, `ConfirmReservation`, `SeatReservation`, `MarkNoShow`, `CancelReservation`, `RecordReservationDeposit`
 
-- [x] Phase 0 — nền móng, 5 lỗi 🔴 đóng sau 2 vòng review
-- [x] Phase 1 — MVP bán hàng, 2 lỗi 🔴 đóng
-- [x] Phase 2 — offline, đồng bộ, khuyến mãi, 2 lỗi 🔴 đóng
-- [x] Bước 0 — Kiểm toán chuẩn bị kho
-- [x] Bước 1 — Schema kho
-- [x] Bước 2 — Nguyên liệu và đơn vị
-- [x] Bước 3 — Định lượng món
-- [x] Bước 4 — Nhập hàng và giá vốn
-- [x] Bước 5 — Trừ kho tự động
-- [x] Bước 6 — Hao hụt và điều chỉnh
-- [x] Bước 7 — Kiểm kê
-- [x] Bước 8 — Báo cáo lãi gộp
-- [x] Bước 9 — Job đối soát
-- [ ] Bước 10 — Opus review  ← ĐANG MỞ
+### NGOÀI phạm vi
+- SMS/email thông báo, UI, Filament resource
+- Dời bàn cho đặt trước sau khi tạo
+- Z-report tách dòng tiền cọc
+
+### Chính sách cọc khi no_show — ĐÃ CHỐT 12/08
+Hệ thống **không tự quyết** giữ hay hoàn cọc; thu ngân thao tác tay bằng `VoidPayment`. Nhưng phải để lại DẤU VẾT, nếu không ba tháng sau không ai trả lời được "khách này no-show, cọc xử lý chưa?":
+- `MarkNoShow` **bắt buộc có lý do**, ghi vào audit log
+- `reservations` có trường ghi nhận cọc đã xử lý hay chưa (`đã hoàn` / `giữ lại` / `chưa xử lý`) — **do người thao tác đánh dấu, hệ thống KHÔNG tự suy diễn**
+- Có báo cáo liệt kê được các đặt bàn `no_show` còn cọc **chưa xử lý**
+
+### Điều kiện đóng bước
+- Toàn bộ test xanh
+- Ba mục "dấu vết cọc" ở trên đã làm
+- Chủ dự án duyệt xong
+
+## P4-4B.0 — Lãi gộp không còn ngụy trang doanh thu thiếu giá vốn thành lãi 100%
+
+Trạng thái: ĐANG REVIEW, CHƯA COMMIT — gửi duyệt TRƯỚC P4-4A.3 (chạm số liệu tài chính, đang chặn P4-4B.1 dashboard)
+
+### Trong phạm vi
+- Sửa `product_profit_daily`: cột `revenue_uncosted_amount`, công thức `profit_amount` trả NULL khi toàn bộ doanh thu chưa có giá vốn
+- `SummarizeProductProfit` tính cột mới
+
+### NGOÀI phạm vi
+- `GetOwnerProfitDashboard.php` / bất kỳ dashboard nào — thuộc P4-4B.1
+- Đổi cách trừ kho của Phase 3
+- Backfill tự động trong migration — CẤM, xem quy trình 3 bước ở `docs/viec-ton.md`
+
+### Backfill — HOÃN tới khi có bản sao dữ liệu THẬT (chốt 12/08)
+Ba mục kiểm tra (lãi gộp phải giảm, doanh thu phải đứng yên, trường đếm phải khớp) **chỉ có ý nghĩa trên dữ liệu thật, méo thật**. `pos:demo` sinh dữ liệu sạch — chạy trên đó chỉ chứng minh code không crash, không chứng minh nó sửa đúng cái méo. Vì vậy **KHÔNG dựng dữ liệu mẫu để thử**.
+
+Làm được ngay, thay thế:
+1. Test tự động trên fixture cố ý dựng MÉO (vài món `has_cost=false`, vài đường phục vụ chưa xác nhận), assert đúng ba mục trên — chạy được trên máy dev và **ở lại repo bảo vệ mãi**, giá trị hơn một lần chạy tay.
+2. Command backfill vẫn viết, **chưa chạy**. Có cờ `--thu` (chạy thử): in bảng so sánh trước/sau, **không ghi gì**.
+
+Khi có dữ liệu thật: chạy `--thu` trước, đọc bảng, mới chạy thật, và chạy **TỪNG THÁNG** — không chạy một phát cả năm.
+
+### Điều kiện đóng bước
+- Toàn bộ test xanh, gồm test fixture méo ở trên
+- Command backfill có `--thu`, đã chứng minh không ghi gì khi chạy thử
+- Chủ dự án duyệt xong
+
+## P4-4B.1 — Dashboard lãi gộp/hao hụt cho chủ quán
+
+Trạng thái: CHƯA MỞ — chờ P4-4B.0 đóng trước, vì `GetOwnerProfitDashboard.php` phải đổi cách đọc `product_profit_daily` (đọc `profit_amount`/`revenue_uncosted_amount` trực tiếp, không tự `SUM(revenue) - SUM(cost)` như hiện tại).

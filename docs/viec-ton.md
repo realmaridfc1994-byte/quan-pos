@@ -108,9 +108,11 @@ Ví dụ:
 
 ---
 
-## Tích điểm thành viên — HOÃN (12/08/2026)
+## Tích điểm thành viên (P4-4A.2) — HOÃN, XOÁ KHỎI BẢN ĐỒ PHASE 4 (12/08/2026)
 
 Quyết định có ý thức, không phải quên.
+Số hiệu bước **P4-4A.2** thuộc về việc này và **không được dùng lại cho việc khác** —
+đặt bàn là P4-4A.3 (có lúc gọi nhầm là 4A.2, đã sửa 12/08). Xem `docs/PHASE.md`.
 Bảng customers đã tạo và commit; phần sổ cái điểm không commit.
 Code tham khảo: branch park/loyalty-4a1
 
