@@ -252,7 +252,55 @@ it('bán 10 phần lúc tồn dương và 5 phần lúc tồn âm thì qty_no_co
         ->and($dong->qty_no_cost)->toBe(5)
         ->and($dong->qty_not_served)->toBe(0)
         // Giá vốn chỉ ghi được phần biết thật, KHÔNG bịa cho 5 phần kia.
-        ->and($dong->cost_amount)->toBe(100_000);
+        ->and($dong->cost_amount)->toBe(100_000)
+        // K19: 5 phần x 50.000đ không xác định giá vốn — đúng bằng doanh thu
+        // của riêng 5 phần đó, khớp dữ liệu thật trong fixture.
+        ->and($dong->revenue_uncosted_amount)->toBe(250_000)
+        // Còn phần ĐÃ biết giá vốn (10 phần, 500.000đ) — lãi gộp CHỈ tính
+        // trên phần đó: 500.000 - 100.000 = 400.000, không trộn 5 phần kia.
+        ->and($dong->profit_amount)->toBe(400_000);
+});
+
+/**
+ * K19 (docs/schema.md K.7) — yêu cầu gốc của bước 4B.0: món has_cost=false
+ * (ở đây TOÀN BỘ số lượng bán trong ngày, không phải một phần) phải trả về
+ * lãi gộp NULL, KHÔNG được ngụy trang thành lãi = doanh thu (bug cũ).
+ */
+it('bán 100% lúc kho đang âm — không lấy sai đại một giá vốn nào — thì lãi gộp NULL, không bằng doanh thu', function () {
+    $ngay = Carbon::parse('2026-08-17');
+    $chuQuan = User::factory()->owner()->create();
+
+    // Kho KHÔNG có tồn đầu nào — mọi phần bán ra đều lúc tồn âm.
+    $ga = Ingredient::factory()->create();
+
+    $ca = Shift::factory()->closed()->create(['opened_at' => $ngay->clone()->setTime(18, 0)]);
+    $session = TableSession::factory()->withTable()->create(['shift_id' => $ca->id, 'opened_at' => $ngay->clone()->setTime(18, 10)]);
+
+    $category = Category::factory()->create();
+    $mon = Product::factory()->for($category)->create(['name' => 'Gà nướng']);
+    $bienThe = ProductVariant::factory()->for($mon)->create(['price' => 80_000]);
+
+    $order = Order::factory()->for($session, 'tableSession')->create(['sent_at' => $ngay->clone()->setTime(19, 0)]);
+    $dong = OrderItem::factory()->for($order, 'order')->create([
+        'product_id' => $mon->id, 'product_variant_id' => $bienThe->id,
+        'unit_price' => 80_000, 'options_amount' => 0, 'quantity' => 2,
+        'status' => OrderItemStatus::Served, 'served_at' => $ngay->clone()->setTime(19, 10),
+    ]); // line_amount = 160.000, KHÔNG có giảm giá nào ở lượt khách này
+
+    ghiGiaVonChoDongMon($ga, $dong, 2, $chuQuan);
+
+    app(SummarizeProductProfit::class)->handle($ngay->toDateString());
+
+    $ketQua = ProductProfitDaily::query()->where('product_variant_id', $bienThe->id)->sole();
+
+    expect($ketQua->revenue_amount)->toBe(160_000)
+        ->and($ketQua->cost_amount)->toBe(0)
+        ->and($ketQua->qty_no_cost)->toBe(2)
+        // Toàn bộ doanh thu chưa xác định giá vốn — bằng đúng revenue_amount.
+        ->and($ketQua->revenue_uncosted_amount)->toBe(160_000)
+        // ĐÂY LÀ ĐIỂM MẤU CHỐT: KHÔNG được là 160_000 (bug cũ = doanh thu),
+        // cũng KHÔNG được là 0 (lẫn lộn với "hoà vốn thật") — phải là NULL.
+        ->and($ketQua->profit_amount)->toBeNull();
 });
 
 it('lượt khách đã đóng mà còn món chưa bấm xong thì qty_not_served đếm đúng', function () {
@@ -287,7 +335,13 @@ it('lượt khách đã đóng mà còn món chưa bấm xong thì qty_not_serve
 
     expect($dong->quantity_sold)->toBe(7)
         ->and($dong->qty_not_served)->toBe(3)
-        ->and($dong->qty_no_cost)->toBe(0);
+        ->and($dong->qty_no_cost)->toBe(0)
+        // K19: doanh thu chưa xác nhận phục vụ (3 phần x 20.000đ) phải nằm
+        // ở nhóm tách riêng revenue_uncosted_amount, khớp fixture.
+        ->and($dong->revenue_uncosted_amount)->toBe(60_000)
+        // Lãi gộp chỉ tính trên 4 phần đã bưng ra (80.000đ), không cộng
+        // doanh thu của 3 phần chưa bấm xong vào lãi.
+        ->and($dong->profit_amount)->toBe(80_000);
 });
 
 it('bàn còn đang ăn dở, món chưa bưng ra thì KHÔNG tính là bếp quên bấm xong', function () {

@@ -1830,9 +1830,29 @@ CREATE TABLE product_profit_daily (
     qty_not_served      INT UNSIGNED    NOT NULL DEFAULT 0
                         COMMENT 'SL đã tính tiền nhưng bếp chưa bấm xong (lượt khách đã đóng mà thiếu served_at)',
 
+    -- Thêm Bước 4B.0 (K19). qty_no_cost/qty_not_served ở trên đếm SỐ LƯỢNG —
+    -- không đủ để tính "% doanh thu thiếu giá vốn" vì giá các món khác nhau,
+    -- số lượng không tỉ lệ thuận với tiền. Cột này là phần TIỀN doanh thu ứng
+    -- với các dòng món nằm trong qty_no_cost HOẶC qty_not_served (gộp, không
+    -- trùng — hai tập không bao giờ giao nhau). KHÔNG bịa, KHÔNG suy ra ngược
+    -- từ qty_no_cost/qty_not_served (giá có thể khác nhau giữa các dòng).
+    revenue_uncosted_amount BIGINT UNSIGNED NOT NULL DEFAULT 0
+                        COMMENT 'Doanh thu ứng với phần chưa xác định được giá vốn (K19)',
+
+    -- Sửa Bước 4B.0 (K19): trước đây LUÔN = revenue_amount - cost_amount, kể
+    -- cả khi cost_amount = 0 vì "không xác định được" chứ không phải "không
+    -- tốn gì" — lãi gộp trông thành 100% doanh thu, SAI. Giờ: NULL khi TOÀN
+    -- BỘ doanh thu ngày/món đó chưa có giá vốn (không có gì đáng tin để tính);
+    -- còn lại thì CHỈ tính trên phần ĐÃ biết giá vốn — phần chưa biết đã có
+    -- revenue_uncosted_amount báo riêng, không trộn vào đây.
     profit_amount       BIGINT
-                        GENERATED ALWAYS AS (CAST(revenue_amount AS SIGNED) - CAST(cost_amount AS SIGNED)) STORED
-                        COMMENT 'Máy tự tính = doanh thu - giá vốn. CỐ Ý có dấu vì bán lỗ vẫn ghi được',
+                        GENERATED ALWAYS AS (
+                            CASE
+                                WHEN (CAST(revenue_amount AS SIGNED) - CAST(revenue_uncosted_amount AS SIGNED)) = 0 THEN NULL
+                                ELSE (CAST(revenue_amount AS SIGNED) - CAST(revenue_uncosted_amount AS SIGNED)) - CAST(cost_amount AS SIGNED)
+                            END
+                        ) STORED
+                        COMMENT 'NULL nếu toàn bộ doanh thu chưa có giá vốn (K19). Còn lại = doanh thu ĐÃ biết giá vốn - giá vốn. CỐ Ý có dấu vì bán lỗ vẫn ghi được',
 
     created_at          TIMESTAMP       NULL,
     updated_at          TIMESTAMP       NULL,
@@ -1840,7 +1860,8 @@ CREATE TABLE product_profit_daily (
     UNIQUE KEY uq_product_profit_daily_date_variant (date, product_variant_id),
     KEY idx_product_profit_daily_date_product (date, product_id),
     CONSTRAINT fk_product_profit_daily_product FOREIGN KEY (product_id)         REFERENCES products (id)         ON DELETE RESTRICT,
-    CONSTRAINT fk_product_profit_daily_variant FOREIGN KEY (product_variant_id) REFERENCES product_variants (id) ON DELETE RESTRICT
+    CONSTRAINT fk_product_profit_daily_variant FOREIGN KEY (product_variant_id) REFERENCES product_variants (id) ON DELETE RESTRICT,
+    CONSTRAINT ck_product_profit_daily_uncosted CHECK (revenue_uncosted_amount <= revenue_amount)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
@@ -1952,6 +1973,7 @@ CREATE TABLE stock_reconciliation_notes (
 | **K16** | Ghi hai lần cùng một mã vân tay chỉ ra một dòng sổ cái | **DB** `uq_stock_movements_uuid` + code |
 | **K17** | Một dòng sổ cái mồ côi chỉ được xác nhận "đã xem" đúng một lần, và phải đủ ai/khi nào/vì sao | **DB** `uq_srn_one_note_per_movement`, `ck_srn_reason` + code |
 | **K18** | Kho phải ĐỨNG YÊN trong lúc một phiếu kiểm kê đang mở | Code (`RecordStockMovement`, `OpenTableSession`, `OpenStockTake`) |
+| **K19** | `product_profit_daily.profit_amount` không bao giờ ngụy trang doanh thu chưa biết giá vốn thành lãi 100%. NULL khi TOÀN BỘ doanh thu ngày/món đó chưa có giá vốn; còn lại chỉ tính trên phần ĐÃ biết, phần chưa biết báo riêng ở `revenue_uncosted_amount`, không trộn chung | **DB** (generated column) |
 
 **K18 — vì sao phải có, và vì sao nó không nằm ở database** (thêm 12/08, Phase 3 Bước 10 sau review Opus).
 
@@ -1993,6 +2015,12 @@ Cách chúng hoạt động: khoá duy nhất `(ref_type, ref_id, ingredient_id)
 **K16 bịt đúng chỗ K5/K7 với không tới** (sửa ngày 11/08, Phase 3 Bước 10). Hao hụt và điều chỉnh tay không có chứng từ gốc nên luôn ghi `ref_id` rỗng, mà MariaDB không coi hai dòng cùng rỗng là trùng nhau — nghĩa là hai đường đó **không được `uq_stock_movements_ref` bảo vệ chút nào**. Thu ngân bấm ghi "5 lon vỡ", mạng lag, bấm lại: kho trừ 10 lon, không lỗi nào nổ. Mã vân tay `uuid` bịt lỗ đó. Hai khoá cùng tồn tại, không khoá nào thay khoá nào.
 
 > **Lưu ý cho Bước 9.** Job đối soát kiểm "mọi dòng món có `served_at` đều có dòng sổ cái tương ứng". Nhưng **dòng tách ra khi hủy một phần cũng có `served_at`** (kế thừa từ dòng gốc) mà **không** có dòng sổ cái — theo đúng K7. Job phải loại trừ những dòng có `split_from_item_id` khác rỗng, nếu không nó sẽ báo lệch giả mỗi lần có hủy một phần.
+
+**K19 — vì sao thêm (Bước 4B.0, sau review Phase 3 phát hiện lãi gộp có thể cao hơn thực tế).**
+
+`qty_no_cost`/`qty_not_served` (K.7 bảng trên) chỉ đếm SỐ LƯỢNG — không tính được "% doanh thu thiếu giá vốn" vì giá các món khác nhau. `revenue_uncosted_amount` là phần TIỀN doanh thu tương ứng. `profit_amount` trước đây luôn `= revenue_amount - cost_amount`; khi `cost_amount = 0` vì "không xác định được" (không phải "không tốn gì"), con số này ngụy trang thành lãi 100%. Từ Bước 4B.0: NULL khi toàn bộ doanh thu ngày/món đó chưa có giá vốn; còn lại chỉ tính trên phần ĐÃ biết, phần chưa biết tách riêng ở `revenue_uncosted_amount`, không bao giờ trộn vào `profit_amount`. Không backfill tự động trong migration — chạy lại `php artisan report:summarize --tu=... --den=...` (lệnh đã có, luôn tính lại từ nguồn gốc) cho khoảng ngày cũ muốn sửa.
+
+Màn hình chủ quán (`GetOwnerProfitDashboard`, Bước 4B.1) hiện tự tính lại lãi gộp bằng SQL riêng, không đọc `profit_amount` — sửa K19 ở đây KHÔNG tự động sửa màn hình đó, xem `docs/viec-ton.md`.
 
 ---
 

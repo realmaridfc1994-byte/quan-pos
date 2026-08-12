@@ -102,26 +102,36 @@ final class SummarizeProductProfit
             $giaVonTheoDongMon = $this->tinhGiaVonTheoDongMon($dongMonHomNay->pluck('id'));
             $idThieuGiaVon = $this->idDongMonThieuGiaVon($dongMonHomNay->pluck('id'));
             $idPhienDaDong = $this->idPhienDaDong($idPhienLienQuan);
+            $idChuaBungRa = $this->idDongMonChuaBungRa($dongMonHomNay, $idPhienDaDong);
+
+            // K19 (docs/schema.md K.7) — hai tập id KHÔNG BAO GIỜ giao nhau:
+            // một dòng món hoặc có sổ cái kho (thuộc idThieuGiaVon nếu
+            // has_cost=false), hoặc không có sổ cái nào vì chưa phục vụ
+            // (thuộc idChuaBungRa) — union thẳng, không lo đếm trùng doanh thu.
+            $idKhongDangTin = array_values(array_unique([...$idThieuGiaVon, ...$idChuaBungRa]));
 
             return $dongMonHomNay
                 ->groupBy(fn (OrderItem $item): string => "{$item->product_id}:{$item->product_variant_id}")
-                ->map(function (Collection $nhom) use ($ngay, $doanhThuTheoDongMon, $giaVonTheoDongMon, $idThieuGiaVon, $idPhienDaDong): ProductProfitDaily {
+                ->map(function (Collection $nhom) use ($ngay, $doanhThuTheoDongMon, $giaVonTheoDongMon, $idThieuGiaVon, $idChuaBungRa, $idKhongDangTin): ProductProfitDaily {
                     $mauDau = $nhom->first();
+                    $layDoanhThu = fn (OrderItem $i) => $doanhThuTheoDongMon[$i->id] ?? $i->line_amount;
 
                     return ProductProfitDaily::query()->create([
                         'date' => $ngay->toDateString(),
                         'product_id' => $mauDau->product_id,
                         'product_variant_id' => $mauDau->product_variant_id,
                         'quantity_sold' => $nhom->sum('quantity'),
-                        'revenue_amount' => $nhom->sum(fn (OrderItem $i) => $doanhThuTheoDongMon[$i->id] ?? $i->line_amount),
+                        'revenue_amount' => $nhom->sum($layDoanhThu),
                         'cost_amount' => $nhom->sum(fn (OrderItem $i) => $giaVonTheoDongMon[$i->id] ?? 0),
                         'qty_no_cost' => $nhom
                             ->filter(fn (OrderItem $i): bool => in_array($i->id, $idThieuGiaVon, true))
                             ->sum('quantity'),
                         'qty_not_served' => $nhom
-                            ->filter(fn (OrderItem $i): bool => $i->served_at === null
-                                && in_array((int) $i->order->table_session_id, $idPhienDaDong, true))
+                            ->filter(fn (OrderItem $i): bool => in_array($i->id, $idChuaBungRa, true))
                             ->sum('quantity'),
+                        'revenue_uncosted_amount' => $nhom
+                            ->filter(fn (OrderItem $i): bool => in_array($i->id, $idKhongDangTin, true))
+                            ->sum($layDoanhThu),
                     ]);
                 })
                 ->values();
@@ -187,6 +197,25 @@ final class SummarizeProductProfit
             ->distinct()
             ->pluck('ref_id')
             ->map(fn ($id): int => (int) $id)
+            ->all();
+    }
+
+    /**
+     * Dòng món đã tính tiền nhưng bếp chưa bấm xong, CHỈ tính khi lượt khách
+     * đã đóng (bàn còn đang ăn dở thì món chưa bưng ra là chuyện bình thường).
+     *
+     * @param  Collection<int, OrderItem>  $dongMonHomNay
+     * @param  list<int>  $idPhienDaDong
+     * @return list<int> danh sách order_item_id
+     */
+    private function idDongMonChuaBungRa(Collection $dongMonHomNay, array $idPhienDaDong): array
+    {
+        return $dongMonHomNay
+            ->filter(fn (OrderItem $i): bool => $i->served_at === null
+                && in_array((int) $i->order->table_session_id, $idPhienDaDong, true))
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->values()
             ->all();
     }
 
