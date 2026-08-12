@@ -11,9 +11,15 @@ use App\Exceptions\DomainException;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Huỷ một phiếu nhập CHỈ khi còn draft. Phiếu đã received đã đưa hàng vào
- * kho thật — muốn trả lại thì dùng nghiệp vụ trả hàng nhà cung cấp (Bước 6),
- * không phải huỷ phiếu nhập.
+ * Huỷ một phiếu nhập CHỈ khi còn draft. Phiếu đã received đã đưa hàng vào kho
+ * thật — huỷ phiếu không phải cách lấy hàng ra.
+ *
+ * Sửa 12/08 (review Phase 3 Bước 10): câu thông báo cũ chỉ người dùng sang
+ * "nghiệp vụ trả hàng nhà cung cấp (Bước 6)" — nghiệp vụ đó KHÔNG TỒN TẠI.
+ * Loại `return` có trong enum, có ràng buộc ở database, có test ở tầng
+ * RecordStockMovement, nhưng không Action nào và không màn hình nào sinh ra nó.
+ * Chỉ đường tới một cánh cửa không có thật còn tệ hơn nói thẳng là chưa có.
+ * Xem docs/viec-ton.md.
  */
 final class CancelPurchase
 {
@@ -27,7 +33,10 @@ final class CancelPurchase
             $purchase = Purchase::query()->lockForUpdate()->findOrFail($data->purchaseId);
 
             if ($purchase->status === PurchaseStatus::Received) {
-                throw new DomainException('Phiếu nhập đã nhận hàng vào kho, không huỷ được nữa.');
+                throw new DomainException(
+                    'Phiếu nhập đã nhận hàng vào kho, không huỷ được nữa. '.
+                    'Hàng nhập nhầm thì chủ quán điều chỉnh tồn kho bằng tay (có ghi lý do và mã PIN).'
+                );
             }
 
             if ($purchase->status === PurchaseStatus::Cancelled) {

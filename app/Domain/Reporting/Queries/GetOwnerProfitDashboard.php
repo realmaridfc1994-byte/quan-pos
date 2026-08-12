@@ -9,6 +9,7 @@ use App\Domain\Inventory\Models\Ingredient;
 use App\Domain\Inventory\Models\StockBalance;
 use App\Domain\Reporting\Models\IngredientWasteMonthly;
 use App\Domain\Reporting\Models\ProductProfitDaily;
+use App\Support\CauHinhQuan;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -22,11 +23,12 @@ use Illuminate\Support\Collection;
  */
 final class GetOwnerProfitDashboard
 {
-    /** Tỉ lệ lãi (lãi/doanh thu) dưới mức này coi là "lãi thấp". */
-    private const NGUONG_TI_LE_LAI_THAP = 0.15;
-
     /** Lấy top bao nhiêu dòng cho mỗi bảng xếp hạng. */
     private const TOP_N = 20;
+
+    public function __construct(
+        private readonly CauHinhQuan $cauHinhQuan,
+    ) {}
 
     /** @return array<string, mixed> */
     public function handle(): array
@@ -36,6 +38,8 @@ final class GetOwnerProfitDashboard
 
         return [
             'thang' => $dauThangNay->translatedFormat('m/Y'),
+            'nguong_lai_thap_phan_tram' => $this->cauHinhQuan->nguongLaiThapPhanTram(),
+            'canh_bao_moc_ngay' => $this->canhBaoMocNgay($dauThangNay),
             'lai_gop_theo_tong' => $tongHopThangNay->sortByDesc('profit_amount')->take(self::TOP_N)->values()->all(),
             'lai_gop_theo_ti_le' => $tongHopThangNay
                 ->filter(fn (array $d) => $d['revenue_amount'] > 0)
@@ -44,6 +48,7 @@ final class GetOwnerProfitDashboard
                 ->values()
                 ->all(),
             'ban_chay_lai_thap' => $this->banChayLaiThap($tongHopThangNay),
+            'thieu_gia_von' => $this->tongKetThieuGiaVon($tongHopThangNay),
             'hao_hut_thang_nay' => $this->haoHutThangNay($dauThangNay),
             'ton_thap' => $this->tonThap(),
         ];
@@ -56,7 +61,7 @@ final class GetOwnerProfitDashboard
     {
         $tongHop = ProductProfitDaily::query()
             ->whereBetween('date', [$tu->toDateString(), $den->toDateString()])
-            ->selectRaw('product_id, product_variant_id, SUM(quantity_sold) as so_luong, SUM(revenue_amount) as doanh_thu, SUM(cost_amount) as gia_von')
+            ->selectRaw('product_id, product_variant_id, SUM(quantity_sold) as so_luong, SUM(revenue_amount) as doanh_thu, SUM(cost_amount) as gia_von, SUM(qty_no_cost) as sl_thieu_gia_von, SUM(qty_not_served) as sl_chua_bung_ra')
             ->groupBy('product_id', 'product_variant_id')
             ->get();
 
@@ -71,24 +76,102 @@ final class GetOwnerProfitDashboard
             $doanhThu = (int) $dong->doanh_thu;
             $giaVon = (int) $dong->gia_von;
             $laiGop = $doanhThu - $giaVon;
+            $soLuong = (int) $dong->so_luong;
+            $thieuGiaVon = (int) $dong->sl_thieu_gia_von;
+            $chuaBungRa = (int) $dong->sl_chua_bung_ra;
+            $tenMon = $v?->product?->name ?? '(món đã xoá)';
+            $margin = $doanhThu > 0 ? $laiGop / $doanhThu : 0.0;
 
             return [
                 'product_id' => (int) $dong->product_id,
                 'product_variant_id' => (int) $dong->product_variant_id,
-                'product_name' => $v?->product?->name ?? '(món đã xoá)',
+                'product_name' => $tenMon,
                 'variant_name' => $v?->name ?? '',
-                'quantity_sold' => (int) $dong->so_luong,
+                'quantity_sold' => $soLuong,
                 'revenue_amount' => $doanhThu,
                 'cost_amount' => $giaVon,
                 'profit_amount' => $laiGop,
-                'margin' => $doanhThu > 0 ? $laiGop / $doanhThu : 0.0,
+                'margin' => $margin,
+                'qty_no_cost' => $thieuGiaVon,
+                'qty_not_served' => $chuaBungRa,
+                'thieu_gia_von' => $thieuGiaVon > 0 || $chuaBungRa > 0,
+                'canh_bao' => $this->cauCanhBao($tenMon, $soLuong, $thieuGiaVon, $chuaBungRa, $margin),
             ];
         });
     }
 
     /**
+     * Câu nói thẳng khi khoảng đang xem có phần CHƯA ĐƯỢC KIỂM phần thiếu giá
+     * vốn (bắt đầu trước mốc trong cấu hình).
+     *
+     * Vì sao cần: hai cột qty_no_cost/qty_not_served chỉ có số từ lần tổng hợp
+     * sau khi chúng ra đời. Dòng chốt từ trước mang số 0 — màn hình sẽ hiện
+     * "không có cảnh báo nào" cho đúng những tháng chưa ai đếm. Cảnh báo IM
+     * LẶNG còn tệ hơn không có cảnh báo: không có thì người ta còn nghi ngờ.
+     */
+    private function canhBaoMocNgay(Carbon $dauKhoangDangXem): ?string
+    {
+        $moc = $this->cauHinhQuan->mocNgayKiemThieuGiaVon();
+
+        if ($dauKhoangDangXem->greaterThanOrEqualTo($moc)) {
+            return null;
+        }
+
+        return "Số liệu trước ngày {$moc->format('d/m/Y')} chưa được kiểm phần thiếu giá vốn — ".
+            'con số lãi có thể cao hơn thực tế.';
+    }
+
+    /**
+     * Dòng tổng đặt ở ĐẦU TRANG báo cáo: có bao nhiêu món đang bị thiếu giá
+     * vốn. Không món nào thiếu thì `so_mon` = 0 và màn hình không hiện gì cả.
+     *
+     * @param  Collection<int, array<string, mixed>>  $tongHopThangNay
+     * @return array{so_mon: int, qty_no_cost: int, qty_not_served: int, cau: ?string}
+     */
+    private function tongKetThieuGiaVon(Collection $tongHopThangNay): array
+    {
+        $monThieu = $tongHopThangNay->filter(fn (array $d): bool => $d['thieu_gia_von']);
+        $soMon = $monThieu->count();
+
+        return [
+            'so_mon' => $soMon,
+            'qty_no_cost' => (int) $monThieu->sum('qty_no_cost'),
+            'qty_not_served' => (int) $monThieu->sum('qty_not_served'),
+            'cau' => $soMon === 0
+                ? null
+                : "Tháng này có {$soMon} món bị thiếu giá vốn — lãi gộp dưới đây cao hơn thực tế.",
+        ];
+    }
+
+    /**
+     * Câu cảnh báo tiếng Việt cho đúng món đó — viết như nói với chủ quán,
+     * nêu rõ CON SỐ LÃI ĐANG CAO HƠN THỰC TẾ chứ không chỉ nói "thiếu dữ liệu".
+     * Món nào không thiếu gì thì trả về null (màn hình không hiện dấu nào).
+     */
+    private function cauCanhBao(string $tenMon, int $soLuong, int $thieuGiaVon, int $chuaBungRa, float $margin): ?string
+    {
+        if ($thieuGiaVon === 0 && $chuaBungRa === 0) {
+            return null;
+        }
+
+        $ve = [];
+        if ($thieuGiaVon > 0) {
+            $ve[] = "{$thieuGiaVon} phần bán lúc kho đang âm nên chưa tính được giá vốn";
+        }
+        if ($chuaBungRa > 0) {
+            $ve[] = "{$chuaBungRa} phần bếp chưa bấm xong";
+        }
+
+        $tiLe = number_format($margin * 100, 1).'%';
+
+        return "Trong {$soLuong} phần {$tenMon} tháng này, ".implode(', và ', $ve).
+            ". Con số lãi {$tiLe} đang CAO HƠN thực tế.";
+    }
+
+    /**
      * "Bán chạy" = số lượng bán >= trung bình số lượng bán mọi món tháng này.
-     * "Lãi thấp" = tỉ lệ lãi dưới NGUONG_TI_LE_LAI_THAP.
+     * "Lãi thấp" = tỉ lệ lãi dưới ngưỡng chủ quán đặt (mặc định 25%, chỉnh
+     * được trên màn hình Filament "Ngưỡng cảnh báo" — xem CauHinhQuan).
      *
      * @param  Collection<int, array<string, mixed>>  $tongHopThangNay
      * @return list<array<string, mixed>>
@@ -100,11 +183,12 @@ final class GetOwnerProfitDashboard
         }
 
         $trungBinhSoLuong = $tongHopThangNay->avg('quantity_sold');
+        $nguongLaiThap = $this->cauHinhQuan->nguongLaiThapTiLe();
 
         return $tongHopThangNay
             ->filter(fn (array $d) => $d['revenue_amount'] > 0
                 && $d['quantity_sold'] >= $trungBinhSoLuong
-                && $d['margin'] < self::NGUONG_TI_LE_LAI_THAP)
+                && $d['margin'] < $nguongLaiThap)
             ->sortBy('margin')
             ->take(self::TOP_N)
             ->values()

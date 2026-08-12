@@ -50,6 +50,11 @@ final class CanhBaoDoiSoatKhoWidget extends Widget
             ], $props->get('lech_cost', [])),
             'thieuSoCai' => $props->get('thieu_so_cai', []),
             'soCaiMoCoi' => $props->get('so_cai_mo_coi', []),
+            // Hai mục CẢNH BÁO (Bước 10) — không tính vào "sạch/lệch", chỉ là
+            // việc cần dọn. Lần đối soát cũ chạy trước Bước 10 không có hai
+            // khoá này trong nhật ký, nên mặc định mảng rỗng.
+            'thieuGiaVon' => $props->get('thieu_gia_von', []),
+            'quenBamXong' => $props->get('quen_bam_xong', []),
         ];
     }
 }

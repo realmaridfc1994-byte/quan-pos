@@ -26,6 +26,8 @@ class ProductProfitDailyFactory extends Factory
             'quantity_sold' => 1,
             'revenue_amount' => $variant->price,
             'cost_amount' => 0,
+            'qty_no_cost' => 0,
+            'qty_not_served' => 0,
         ];
     }
 }

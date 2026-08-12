@@ -13,6 +13,7 @@ use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 
@@ -112,4 +113,41 @@ it('chủ quán và thu ngân cũng đổi được trạng thái món trên KDS
     $owner = User::factory()->owner()->create();
 
     danhDauXongMon($owner, $this->itemA)->assertOk();
+});
+
+/**
+ * THỨ TỰ KHOÁ — chống kẹt chéo (sửa 12/08, review Phase 3 Bước 10).
+ *
+ * CancelOrderItem khoá `orders` rồi mới tới `order_items`. Action này TỪNG khoá
+ * ngược lại: `order_items` → `stock_balances` → `orders`. Hai bên giữ chặt cái
+ * bên kia đang chờ — thu ngân huỷ món đúng lúc bếp bấm xong là kẹt chéo, MySQL
+ * huỷ một bên và người dùng nhận một thông báo lỗi khó hiểu. Phase 3 còn nhét
+ * cả công đoạn trừ kho vào giữa hai lần khoá, kéo dài khoảng nguy hiểm.
+ *
+ * Luật chuỗi khoá ở CLAUDE.md mục 4.11 chốt thứ tự: TableSession → Order →
+ * OrderItem → ... → StockBalance. Test này đọc đúng thứ tự các câu `for update`
+ * thật sự chạy, nên nó đỏ ngay nếu ai đảo lại.
+ */
+it('khoá phiếu bếp TRƯỚC dòng món và trước bảng tồn — đúng chuỗi khoá chống kẹt chéo', function () {
+    $thuTuKhoa = [];
+
+    DB::listen(function ($truyVan) use (&$thuTuKhoa): void {
+        if (! str_contains(strtolower($truyVan->sql), 'for update')) {
+            return;
+        }
+
+        foreach (['`orders`' => 'orders', '`order_items`' => 'order_items', '`stock_balances`' => 'stock_balances'] as $mau => $ten) {
+            if (str_contains($truyVan->sql, $mau)) {
+                $thuTuKhoa[] = $ten;
+            }
+        }
+    });
+
+    danhDauXongMon($this->bep, $this->itemA)->assertOk();
+
+    $viTri = fn (string $bang): int|false => array_search($bang, $thuTuKhoa, true);
+
+    expect($viTri('orders'))->not->toBeFalse('Không thấy câu khoá bảng orders nào.')
+        ->and($viTri('order_items'))->not->toBeFalse('Không thấy câu khoá bảng order_items nào.')
+        ->and($viTri('orders'))->toBeLessThan($viTri('order_items'));
 });

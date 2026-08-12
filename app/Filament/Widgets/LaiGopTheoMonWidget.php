@@ -34,6 +34,9 @@ final class LaiGopTheoMonWidget extends Widget
 
         return [
             'thang' => $duLieu['thang'],
+            // Câu này phải nằm NGAY TRÊN bảng số, không phải cuối trang: người
+            // đọc phải biết số dưới đây chưa được kiểm TRƯỚC khi tin vào nó.
+            'canhBaoMocNgay' => $duLieu['canh_bao_moc_ngay'],
             'theoTong' => $ganNhan($duLieu['lai_gop_theo_tong']),
             'theoTiLe' => $ganNhan($duLieu['lai_gop_theo_ti_le']),
         ];

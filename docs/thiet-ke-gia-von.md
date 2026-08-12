@@ -132,11 +132,35 @@ Chênh lệch giữa giá vốn ghi giảm và tiền nhà cung cấp hoàn lạ
 | 2 | Xuất nhiều hơn tồn | Lấy hết vốn, `qty` âm, `total_cost` = 0, `has_cost` = 0 | K9 |
 | 3 | Xuất khi tồn đang âm | Giá vốn 0, `has_cost` = 0 | — |
 | 4 | Tồn về 0 rồi nhập lại | Giá TB mới hoàn toàn, **không nhớ giá cũ** | — |
-| 5 | Nhập khi tồn đang âm | Cộng bình thường; giá TB lệch cao tạm thời, kiểm kê dọn | — |
+| 5 | Nhập khi tồn đang âm | Tách phần trả nợ ra một dòng `close_residual` riêng, phần còn lại mới vào kho | K9 |
 | 6 | Kiểm kê thừa lúc `qty ≤ 0` | Giá vốn 0, `has_cost` = 0, cảnh báo | — |
 | 7 | `total_cost × n` tràn số nguyên 64 bit | **Kiểm trước khi nhân**, ném lỗi rõ ràng | — |
 
 Trường hợp 4 là câu trả lời cho câu hỏi *"tồn về 0 rồi nhập lại thì giá vốn tính thế nào"*: giá vốn mới hoàn toàn. Vì `total_cost` đã về 0, lô nhập mới quyết định giá trung bình một mình.
+
+### Trường hợp 5 — viết lại ngày 12/08 sau review Phase 3 Bước 10
+
+Dòng cũ của bảng trên ghi *"cộng bình thường; giá TB lệch cao tạm thời, kiểm kê dọn"*. **Câu đó sai, và nó mâu thuẫn với chính van an toàn K9 ở mục 7 của tài liệu này.** Hai chuyện xảy ra:
+
+- **Nhập bù ĐÚNG BẰNG số đang thiếu:** tồn về 0 mà `total_cost` còn tiền → van K9 nổ, ném `StockLedgerInvariantViolatedException`, cả phiếu nhập quay lui. **Không nhận được hàng.** Chủ quán đọc thấy câu "Lỗi lập trình" và không có đường nào đi tiếp. Với nguyên liệu đếm theo con/lon thì tồn âm 2 rồi nhập đúng 2 là chuyện bình thường.
+- **Nhập bù NHIỀU HƠN số đang thiếu:** nhập 10 lon giá 500.000 (50.000/lon) → bán 12 → nhập 5 lon giá 300.000 (60.000/lon). Ba lon còn lại mang trọn 300.000, tức 100.000/lon — **gấp rưỡi giá thật**. Ba lon bán tiếp theo bị tính giá vốn sai, lãi gộp của món đó thấp giả. "Kiểm kê dọn" không dọn được: kiểm kê sửa số lượng, không sửa được giá vốn đã tính sai cho những phần đã bán.
+
+**Cách làm đúng:** phần lô hàng dùng để trả nợ cho số đã bán lúc kho âm là hàng **đã ra khỏi quán**, không được nằm lại trong kho. `RecordStockMovement` ghi TRƯỚC một dòng `close_residual` (`qty_delta = 0`, `cost_delta` âm) mang đúng phần tiền đó, rồi mới ghi dòng nhập với đủ số tiền thật trả nhà cung cấp.
+
+Ví dụ: tồn −2, nhập 5 lon giá 300.000đ.
+
+| Dòng | type | qty_delta | cost_delta | qty_after | cost_after |
+|---|---|---|---|---|---|
+| 1 | `close_residual` | 0 | −120.000 | −2 | −120.000 |
+| 2 | `purchase` | +5 | +300.000 | 3 | 180.000 |
+
+Ba lon còn lại mang 180.000đ = **60.000đ/lon, đúng bằng đơn giá lô vừa nhập.**
+
+Ghi dòng trả nợ **trước** chứ không phải sau là bắt buộc: ghi sau thì dòng nhập đưa tồn về đúng 0 với trị giá còn dương trong một khoảnh khắc và van K9 nổ ngay tại đó. Ghi trước thì tồn vẫn đang âm, mà trị giá âm lúc tồn âm là hợp lệ (`ck_stock_balances_cost` chỉ đòi trị giá không âm khi tồn dương).
+
+Chia tiền bằng `StockCost::phanTienTheoSoLuong()` (số nguyên, làm tròn nửa lên); phần vào kho lấy bằng **phép trừ** chứ không tính tròn lần thứ hai, nên hai phần cộng lại luôn đúng bằng số tiền thật trả nhà cung cấp — không rơi một đồng nào.
+
+**`close_residual` không còn là code chết.** Review lần đầu kết luận đây là loại không có đường nào ghi được; giờ nó có đúng một đường, và đúng công dụng `docs/schema.md` K.4 đã chừa sẵn cho nó.
 
 ---
 

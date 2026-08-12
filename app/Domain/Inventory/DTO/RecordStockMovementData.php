@@ -18,6 +18,13 @@ use Carbon\CarbonImmutable;
 final readonly class RecordStockMovementData
 {
     public function __construct(
+        /**
+         * Mã vân tay của dòng sổ cái — chống ghi trùng khi bấm hai lần hoặc
+         * gọi lại vì mạng lag. Hao hụt/điều chỉnh: do MÀN HÌNH sinh và gửi lên.
+         * Bán món/nhập hàng/kiểm kê: server sinh TẤT ĐỊNH từ chứng từ gốc, xem
+         * App\Support\StockMovementUuid.
+         */
+        public string $uuid,
         public int $ingredientId,
         public StockMovementType $type,
         /** Dương = vào kho, âm = ra kho. Không bao giờ bằng 0. */

@@ -55,6 +55,7 @@ use App\Domain\Sync\Enums\OperationType;
 use App\Exceptions\DomainException;
 use App\Support\CashVariance;
 use App\Support\Money;
+use App\Support\StockMovementUuid;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Console\Command;
@@ -500,6 +501,7 @@ final class PosDemo extends Command
 
         $recordStockMovement = app(RecordStockMovement::class);
         $recordStockMovement->handle(new RecordStockMovementData(
+            uuid: StockMovementUuid::tuChuoi("pos-demo:ton-dau:{$ga->id}"),
             ingredientId: $ga->id,
             type: StockMovementType::Purchase,
             qtyDelta: 5_000,
@@ -512,6 +514,7 @@ final class PosDemo extends Command
             shiftId: null,
         ));
         $recordStockMovement->handle(new RecordStockMovementData(
+            uuid: StockMovementUuid::tuChuoi("pos-demo:ton-dau:{$sa->id}"),
             ingredientId: $sa->id,
             type: StockMovementType::Purchase,
             qtyDelta: 1_000,

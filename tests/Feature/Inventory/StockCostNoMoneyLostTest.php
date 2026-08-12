@@ -107,11 +107,12 @@ it('1000 thao tác ngẫu nhiên không mất một đồng nào, hạt ngẫu n
             )),
         };
 
-        if ($movement->cost_delta > 0) {
-            $tongDaNhap += $movement->cost_delta;
-        } elseif ($movement->cost_delta < 0) {
-            $tongGiaVonDaXuat += -$movement->cost_delta;
-        }
+        // Cộng dồn từ SỔ CÁI, không từ dòng mà handle() trả về. Một lần gọi có
+        // thể sinh HAI dòng: nhập hàng lúc kho đang âm ghi thêm một dòng
+        // `close_residual` chốt giá vốn phần hàng đã bán (xem
+        // RecordStockMovement::chotGiaVonHangDaBanLucKhoAm). Đếm theo dòng trả
+        // về sẽ bỏ sót đúng dòng đó, và đẳng thức tổng tiền hụt đi.
+        expect($movement)->toBeInstanceOf(StockMovement::class);
 
         $balance = StockBalance::query()->find($ingredient->id);
 
@@ -131,6 +132,16 @@ it('1000 thao tác ngẫu nhiên không mất một đồng nào, hạt ngẫu n
     }
 
     $balanceCuoi = StockBalance::query()->find($ingredient->id);
+
+    $tongDaNhap = (int) StockMovement::query()
+        ->where('ingredient_id', $ingredient->id)
+        ->where('cost_delta', '>', 0)
+        ->sum('cost_delta');
+
+    $tongGiaVonDaXuat = -(int) StockMovement::query()
+        ->where('ingredient_id', $ingredient->id)
+        ->where('cost_delta', '<', 0)
+        ->sum('cost_delta');
 
     expect($tongDaNhap - $tongGiaVonDaXuat)->toBe($balanceCuoi->total_cost);
 });

@@ -9,6 +9,7 @@ use App\Domain\Billing\Enums\PaymentStatus;
 use App\Domain\Billing\Models\Payment;
 use App\Domain\Ordering\Enums\OrderItemStatus;
 use App\Domain\Ordering\Enums\OrderStatus;
+use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Reporting\Models\DailySummary;
@@ -109,7 +110,13 @@ final class SummarizeDailyReport
         return OrderItem::query()
             ->whereHas('order', fn ($q) => $q
                 ->whereDate('sent_at', $ngay)
-                ->where('status', '!=', OrderStatus::Cancelled))
+                ->where('status', '!=', OrderStatus::Cancelled)
+                // Bill của khách bỏ về không trả tiền (lượt khách bị huỷ cả
+                // lượt) không mang doanh thu — cùng lý do đã ghi ở
+                // SummarizeProductProfit. Doanh thu tổng ở tongHopNgay() lấy từ
+                // các phiếu thu nên vốn đã đếm 0 cho những bill này; bảng theo
+                // món phải nói cùng một câu, không thì hai màn hình cãi nhau.
+                ->whereHas('tableSession', fn ($qq) => $qq->where('status', '!=', TableSessionStatus::Void)))
             ->where('status', '!=', OrderItemStatus::Cancelled)
             ->selectRaw('product_id, product_variant_id, SUM(quantity) as so_luong, SUM(line_amount) as doanh_thu')
             ->groupBy('product_id', 'product_variant_id')

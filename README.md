@@ -130,7 +130,24 @@ Tắt theo thứ tự nào cũng được, không sợ mất dữ liệu — d�
 
 ---
 
-## 3. Cách reset dữ liệu về trạng thái mẫu ban đầu — và cách dựng lại môi trường từ đầu
+## 3. Cách cập nhật hệ thống trên máy ở quán (khi có bản mới)
+
+**Chạy ĐÚNG THỨ TỰ hai lệnh này, không được đảo:**
+
+```bash
+php artisan stock:backfill-uuid
+php artisan migrate
+```
+
+Lệnh đầu gán "mã vân tay" cho những dòng sổ kho cũ chưa có. Lệnh sau mới siết luật bắt buộc mọi dòng phải có mã đó.
+
+**Chạy ngược thì sao?** Lệnh `migrate` sẽ **dừng lại và báo còn bao nhiêu dòng thiếu** — ví dụ *"Còn 1.240 dòng sổ cái kho chưa có uuid. Chạy php artisan stock:backfill-uuid trước."* **Không hỏng gì cả**, không mất dữ liệu. Chỉ cần chạy `stock:backfill-uuid` rồi chạy lại `php artisan migrate`.
+
+**Mã vân tay để làm gì?** Để khi nhân viên bấm ghi "5 lon bia vỡ", mạng lag, bấm lại lần nữa — kho chỉ trừ 5 lon chứ không phải 10. Giống hệt cách phiếu thu tiền chống thu trùng.
+
+---
+
+## 4. Cách reset dữ liệu về trạng thái mẫu ban đầu — và cách dựng lại môi trường từ đầu
 
 ⚠️ **Việc này xoá sạch toàn bộ dữ liệu thật đang có** (bàn đang mở, hoá đơn, tiền đã thu...) và thay bằng dữ liệu mẫu để demo/test. **Không bao giờ chạy lệnh này khi quán đang hoạt động thật.**
 
@@ -141,7 +158,7 @@ php artisan migrate:fresh --seed
 Nói bằng ngôn ngữ dễ hiểu: lệnh này dựng lại **toàn bộ** database từ đầu — đọc đúng cấu trúc bảng hiện tại trong code (không phải một file cấu hình cũ có thể đã lỗi thời), rồi nạp dữ liệu mẫu vào. Vì luôn đọc từ code hiện tại, kết quả luôn khớp với đúng phiên bản đang chạy — đây là cách duy nhất để dựng môi trường từ đầu trong dự án này.
 
 Lệnh này dựng lại toàn bộ database trắng tinh, rồi nạp:
-- 4 tài khoản mẫu (xem mục 5)
+- 4 tài khoản mẫu (xem mục 7)
 - 12 bàn mẫu
 - Thực đơn mẫu (các món nhắm, nướng, lẩu, hải sản, đồ uống...)
 
@@ -153,7 +170,7 @@ php artisan db:seed
 
 ---
 
-## 4. Cách xem log khi có lỗi
+## 5. Cách xem log khi có lỗi
 
 Log là "sổ nhật ký" ghi lại mọi lỗi hệ thống gặp phải. Khi màn hình báo lỗi hoặc có gì bất thường, xem log để biết chuyện gì xảy ra.
 
@@ -171,7 +188,7 @@ Gặp lỗi thì **chụp màn hình hoặc copy đoạn lỗi cuối file**, g�
 
 ---
 
-## 5. Cách chạy kiểm tra hệ thống (phase0:check)
+## 6. Cách chạy kiểm tra hệ thống (phase0:check)
 
 **Lệnh này AN TOÀN — chỉ đọc dữ liệu, không xoá gì cả.** Có thể chạy bất cứ lúc nào, kể cả giữa giờ quán đang đông khách, không ảnh hưởng đến bàn/hoá đơn/ca đang mở.
 
@@ -198,11 +215,11 @@ thì lệnh sẽ **chạy thật toàn bộ test tự động, và bước đó 
 - Trước khi thật sự xoá, lệnh sẽ hỏi lại — phải gõ đúng chữ `XOA-DU-LIEU` mới chạy tiếp, gõ sai hoặc để trống thì huỷ, không mất gì.
 - Chạy xong nhớ `php artisan db:seed` lại để có dữ liệu mẫu.
 
-**Nếu nghi ngờ hệ thống có gì đó sai lúc đang bán hàng**: xem log trước (mục 4 bên trên), rồi gọi người phụ trách kỹ thuật — đừng tự chạy `--with-tests` giữa giờ.
+**Nếu nghi ngờ hệ thống có gì đó sai lúc đang bán hàng**: xem log trước (mục 5 bên trên), rồi gọi người phụ trách kỹ thuật — đừng tự chạy `--with-tests` giữa giờ.
 
 ---
 
-## 6. Thông tin đăng nhập 4 tài khoản mẫu
+## 7. Thông tin đăng nhập 4 tài khoản mẫu
 
 Sau khi chạy `migrate:fresh --seed` hoặc `db:seed`, hệ thống có sẵn 4 tài khoản:
 
@@ -219,7 +236,7 @@ Mã PIN dùng để đăng nhập nhanh trên máy tính bảng tại quầy (kh
 
 ---
 
-## 7. Dữ liệu đồng bộ cũ tự dọn, không cần ai làm gì
+## 8. Dữ liệu đồng bộ cũ tự dọn, không cần ai làm gì
 
 Khi máy POS mất mạng rồi gửi lại dữ liệu (Phase 2), hệ thống ghi tạm một "sổ tay" tên `sync_applied_ops` để nhận ra thao tác nào đã làm rồi, tránh làm trùng. Sổ này **không phải hoá đơn hay dữ liệu bán hàng** — chỉ cần giữ vài ngày là đủ.
 
@@ -231,7 +248,7 @@ php artisan sync:cleanup-applied-ops
 
 ---
 
-## 8. Khi gặp lỗi thì làm gì
+## 9. Khi gặp lỗi thì làm gì
 
 ### Lỗi 1: Mở trang web báo "Không kết nối được database" / "Connection refused"
 

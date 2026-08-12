@@ -183,7 +183,18 @@ it('đã có phiếu kiểm kê đang mở thì không mở thêm phiếu mới'
     expect(StockTake::query()->count())->toBe(1);
 });
 
-it('mở phiếu chụp đúng tồn hệ thống tại thời điểm mở, không đổi dù kho biến động sau đó', function () {
+/**
+ * K18 — KHO PHẢI ĐỨNG YÊN TRONG LÚC PHIẾU KIỂM KÊ ĐANG MỞ.
+ *
+ * Test này TRƯỚC ĐÂY khẳng định điều ngược lại: "kho biến động sau khi mở phiếu
+ * cũng không làm đổi số chụp". Đúng về mặt cột dữ liệu, nhưng nó hợp thức hoá
+ * đúng cái tình huống sinh ra lỗi cộng hai lần (xem review Phase 3 Bước 10):
+ * tồn 100 → mở phiếu → nhập 20 (tồn 120) → nhân viên đếm tay thấy 120 → chốt
+ * phiếu cộng thêm (120 − 100) = 20 nữa → hệ thống ghi 140.
+ *
+ * Giờ số chụp vẫn đóng băng, nhưng kho không còn nhúc nhích được nữa.
+ */
+it('phiếu kiểm kê đang mở thì không ai nhập hàng, ghi hao hụt hay điều chỉnh được', function () {
     $bia = Ingredient::factory()->create();
     nhapTonDauStockTake($bia, 100, 2_000_000, $this->chuQuan);
 
@@ -191,9 +202,58 @@ it('mở phiếu chụp đúng tồn hệ thống tại thời điểm mở, kh�
     $dong = $phieu->items()->where('ingredient_id', $bia->id)->sole();
     expect($dong->system_qty)->toBe(100);
 
-    nhapTonDauStockTake($bia, 20, 400_000, $this->chuQuan);
+    expect(fn () => nhapTonDauStockTake($bia, 20, 400_000, $this->chuQuan))
+        ->toThrow(DomainException::class, 'Đang có phiếu kiểm kê mở');
 
-    expect($dong->refresh()->system_qty)->toBe(100);
+    // Kho không đổi một chút nào, và số chụp vẫn là số chụp.
+    expect(StockBalance::query()->find($bia->id)->qty)->toBe(100)
+        ->and($dong->refresh()->system_qty)->toBe(100);
+});
+
+it('nhập hàng giữa lúc kiểm kê KHÔNG còn làm chốt phiếu cộng hai lần', function () {
+    $bia = Ingredient::factory()->create();
+    nhapTonDauStockTake($bia, 100, 2_000_000, $this->chuQuan);
+
+    $phieu = $this->openAction->handle(new OpenStockTakeData(note: null, openedByUserId: $this->chuQuan->id));
+    $dong = $phieu->items()->where('ingredient_id', $bia->id)->sole();
+
+    // Xe hàng tới giữa lúc đang đếm: bị chặn, phải chờ chốt phiếu xong.
+    expect(fn () => nhapTonDauStockTake($bia, 20, 400_000, $this->chuQuan))
+        ->toThrow(DomainException::class);
+
+    // Nhân viên đếm tay, thấy đúng 100 lon vì hàng chưa được nhập.
+    $this->countAction->handle(new RecordStockTakeCountData($dong->id, 100));
+    $this->closeAction->handle(new CloseStockTakeData(stockTakeId: $phieu->id, closedByUserId: $this->chuQuan->id));
+
+    // Đếm bao nhiêu thì hệ thống ghi đúng bấy nhiêu — không cộng thêm lần nào.
+    expect(StockBalance::query()->find($bia->id)->qty)->toBe(100);
+
+    // Chốt phiếu xong, kho mở lại bình thường.
+    nhapTonDauStockTake($bia, 20, 400_000, $this->chuQuan);
+    expect(StockBalance::query()->find($bia->id)->qty)->toBe(120);
+});
+
+it('bán món KHÔNG bao giờ bị chặn dù phiếu kiểm kê đang mở — bếp không bị đứng', function () {
+    $bia = Ingredient::factory()->create();
+    nhapTonDauStockTake($bia, 100, 2_000_000, $this->chuQuan);
+
+    $this->openAction->handle(new OpenStockTakeData(note: null, openedByUserId: $this->chuQuan->id));
+
+    app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
+        ingredientId: $bia->id,
+        type: StockMovementType::Sale,
+        qtyDelta: -3,
+        knownCost: null,
+        refType: StockMovementRefType::Manual,
+        refId: null,
+        reason: null,
+        approvedByUserId: null,
+        createdByUserId: $this->chuQuan->id,
+        shiftId: null,
+    ));
+
+    expect(StockBalance::query()->find($bia->id)->qty)->toBe(97);
 });
 
 it('màn hình danh sách kiểm kê mở được và mở phiếu qua nút, không lỗi', function () {

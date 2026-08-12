@@ -66,6 +66,33 @@ final class StockCost
     }
 
     /**
+     * Chia một số tiền theo tỉ lệ số lượng, bằng số nguyên.
+     *
+     * "Lô hàng 5 lon giá 300.000đ, trong đó 2 lon dùng để bù cho số đã bán lúc
+     * kho âm — 2 lon đó đáng bao nhiêu tiền?"
+     *
+     * Người GỌI chịu trách nhiệm lấy phần còn lại bằng PHÉP TRỪ
+     * ($tongTien − kết quả), không gọi hàm này lần thứ hai cho phần kia — làm
+     * vậy mới đảm bảo hai phần cộng lại đúng bằng $tongTien, không rơi một đồng
+     * nào vì làm tròn.
+     *
+     * @param  int  $soPhan  số phần cần tính tiền, 0 <= $soPhan <= $tongSoPhan
+     * @param  int  $tongSoPhan  tổng số phần của cả lô, > 0
+     */
+    public static function phanTienTheoSoLuong(int $tongTien, int $soPhan, int $tongSoPhan): int
+    {
+        if ($tongTien < 0) {
+            throw new InvalidArgumentException("Số tiền không được âm: {$tongTien}");
+        }
+
+        if ($soPhan < 0 || $soPhan > $tongSoPhan) {
+            throw new InvalidArgumentException("Số phần {$soPhan} không nằm trong khoảng 0..{$tongSoPhan}.");
+        }
+
+        return self::lamTron(self::nhanAnToan($tongTien, $soPhan), $tongSoPhan);
+    }
+
+    /**
      * Giá vốn khi nhập vào theo giá trung bình hiện tại — mục 5.1
      * (kiểm kê thừa, điều chỉnh tăng không phải nhập hàng thật).
      *

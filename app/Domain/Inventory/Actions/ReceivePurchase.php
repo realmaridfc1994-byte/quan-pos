@@ -11,6 +11,7 @@ use App\Domain\Inventory\Enums\StockMovementRefType;
 use App\Domain\Inventory\Enums\StockMovementType;
 use App\Domain\Inventory\Models\Purchase;
 use App\Exceptions\DomainException;
+use App\Support\StockMovementUuid;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -43,6 +44,7 @@ final class ReceivePurchase
 
             foreach ($dongPhieu as $dong) {
                 $this->recordStockMovement->handle(new RecordStockMovementData(
+                    uuid: StockMovementUuid::tuChungTu(StockMovementRefType::PurchaseItem, $dong->id, $dong->ingredient_id),
                     ingredientId: $dong->ingredient_id,
                     type: StockMovementType::Purchase,
                     qtyDelta: $dong->qty_base,

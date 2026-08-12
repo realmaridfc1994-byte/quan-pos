@@ -11,6 +11,11 @@ namespace App\Domain\Inventory\DTO;
 final readonly class AdjustStockData
 {
     public function __construct(
+        /**
+         * Mã vân tay do MÀN HÌNH sinh một lần lúc mở form và gửi kèm khi bấm
+         * lưu — bấm hai lần chỉ ghi một dòng điều chỉnh.
+         */
+        public string $uuid,
         public int $ingredientId,
         /** Dương = tăng tồn, âm = giảm tồn. Không bao giờ bằng 0. */
         public int $qtyDelta,

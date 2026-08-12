@@ -63,6 +63,19 @@ const DONG_MIEN_TRU = [
         'if ($d->revenue_amount > 0 && ($d->cancelled_item_amount / $d->revenue_amount) >= self::NGUONG_TI_LE_HUY) {',
         '$tiLe = round($d->cancelled_item_amount / $d->revenue_amount * 100);',
     ],
+
+    // Cùng loại ngoại lệ với hai dòng trên: lãi gộp ÷ doanh thu ra TỈ LỆ LÃI để
+    // xếp hạng món và in ra câu "con số lãi 32,5% đang cao hơn thực tế". Kết quả
+    // không được lưu vào cột nào, không cộng vào số tiền nào, không chia tiền
+    // cho ai. Dòng này chỉ hiện ra sau khi bộ quét được vá ngày 12/08 để nhìn cả
+    // biến chứ không chỉ tên cột — trước đó nó lọt, không phải vì hợp lệ mà vì
+    // cái lưới thủng.
+    //
+    // Ngoại lệ HẾT HIỆU LỰC ngay nếu tỉ lệ này được dùng để chia tiền thật (ví
+    // dụ tính thưởng theo phần trăm) — lúc đó phải đổi sang số nguyên phần vạn.
+    'Domain/Reporting/Queries/GetOwnerProfitDashboard.php' => [
+        '$margin = $doanhThu > 0 ? $laiGop / $doanhThu : 0.0;',
+    ],
 ];
 
 /** Bỏ mọi comment, giữ nguyên số dòng, để chữ trong comment không báo động giả. */
@@ -84,6 +97,78 @@ function boComment(string $ma): string
     return $ketQua;
 }
 
+/**
+ * LỖ HỔNG CŨ CỦA BỘ QUÉT NÀY (vá 12/08, review Phase 3 Bước 10).
+ *
+ * Trước đây bộ quét chỉ nhìn xem DÒNG CODE CÓ NHẮC TÊN CỘT TIỀN hay không. Code
+ * gán tiền vào một biến tên tiếng Việt rồi mới chia thì lọt qua sạch sẽ:
+ *
+ *     $doanhThu = (int) $dong->doanh_thu;     // doanh_thu là bí danh của revenue_amount
+ *     $margin   = $laiGop / $doanhThu;        // không có chữ nào trong COT_TIEN → lọt
+ *
+ * Cái lưới thủng nguy hiểm hơn không có lưới, vì nó cho cảm giác an toàn rộng
+ * hơn thứ nó thật sự bảo vệ. Giờ bộ quét đi theo ba bước cho từng file:
+ *
+ *   1. BÍ DANH: `SUM(revenue_amount) as doanh_thu` → `doanh_thu` cũng là tên tiền.
+ *   2. BIẾN TIỀN: biến nào được gán từ một dòng có tên tiền thì chính nó là
+ *      biến tiền, lan truyền cho tới khi không tìm thêm được biến nào nữa.
+ *   3. Dòng nào có phép chia mà nhắc tới tên tiền hoặc biến tiền thì bị bắt.
+ *
+ * Giới hạn đã biết: bộ quét đọc từng DÒNG, nên một phép chia bị ngắt xuống hai
+ * dòng sẽ lọt. Chấp nhận — mục đích của nó là chặn thói quen, không phải chứng
+ * minh định lý.
+ *
+ * @param  list<string>  $dongMa
+ * @return list<string> tên biến (không có dấu $) đang giữ số tiền
+ */
+function bienGiuTien(array $dongMa, string $cotTien): array
+{
+    $tenTien = [];
+
+    // Bước 1 — bí danh trong selectRaw: `SUM(revenue_amount) as doanh_thu`.
+    foreach ($dongMa as $dong) {
+        if (preg_match_all("/\b(?:{$cotTien})\b[^,']*?\bas\s+(\w+)/i", $dong, $khop) === 0) {
+            continue;
+        }
+
+        foreach ($khop[1] as $biDanh) {
+            $tenTien[] = $biDanh;
+        }
+    }
+
+    // Bước 2 — lan truyền sang biến, chạy lại cho tới khi không thêm được gì.
+    $bienTien = [];
+
+    do {
+        $themDuoc = false;
+        $moiTen = $tenTien === [] ? $cotTien : $cotTien.'|'.implode('|', array_unique($tenTien));
+        $moiBien = $bienTien === [] ? null : implode('|', array_unique($bienTien));
+
+        foreach ($dongMa as $dong) {
+            if (preg_match('/\$(\w+)\s*=(?!=)/', $dong, $khopBien) !== 1) {
+                continue;
+            }
+
+            $ten = $khopBien[1];
+            if (in_array($ten, $bienTien, true)) {
+                continue;
+            }
+
+            $vePhai = substr($dong, (int) strpos($dong, '=') + 1);
+
+            $coTien = preg_match("/\b({$moiTen})\b/", $vePhai) === 1
+                || ($moiBien !== null && preg_match("/\\\$({$moiBien})\b/", $vePhai) === 1);
+
+            if ($coTien) {
+                $bienTien[] = $ten;
+                $themDuoc = true;
+            }
+        }
+    } while ($themDuoc);
+
+    return [...array_unique($tenTien), ...array_unique($bienTien)];
+}
+
 it('không có chỗ nào trong app/ chia số tiền bằng phép chia số thực', function () {
     $cotTien = implode('|', COT_TIEN);
     $viPham = [];
@@ -94,9 +179,15 @@ it('không có chỗ nào trong app/ chia số tiền bằng phép chia số th�
         $mienTru = DONG_MIEN_TRU[$duongDan] ?? [];
         $dongMa = explode("\n", boComment($file->getContents()));
 
+        $tenTienThemVao = bienGiuTien($dongMa, $cotTien);
+        $mauTien = $tenTienThemVao === []
+            ? "/\b({$cotTien})\b/"
+            : "/\b({$cotTien}|".implode('|', $tenTienThemVao).')\b/';
+
         foreach ($dongMa as $i => $dong) {
-            // Có nhắc tới cột tiền không?
-            if (preg_match("/\b({$cotTien})\b/", $dong) !== 1) {
+            // Có nhắc tới tiền không — tên cột, bí danh của cột, hay biến đang
+            // giữ tiền?
+            if (preg_match($mauTien, $dong) !== 1) {
                 continue;
             }
 
@@ -115,6 +206,30 @@ it('không có chỗ nào trong app/ chia số tiền bằng phép chia số th�
     }
 
     expect($viPham)->toBe([], "Chia tiền bằng phép chia số thực. Dùng StockCost::lamTron() thay thế:\n".implode("\n", $viPham));
+});
+
+it('bộ quét bắt được cả phép chia trên BIẾN đã gán từ cột tiền, không chỉ trên tên cột', function () {
+    $cotTien = implode('|', COT_TIEN);
+
+    $maSai = explode("\n", boComment(<<<'PHP'
+        <?php
+        $tong = $q->selectRaw('SUM(revenue_amount) as doanh_thu')->get();
+        $doanhThu = (int) $tong->doanh_thu;
+        $laiGop = $doanhThu - 1000;
+        $margin = $laiGop / $doanhThu;
+        PHP));
+
+    $ten = bienGiuTien($maSai, $cotTien);
+
+    // Bí danh và cả ba biến phải bị nhận là "đang giữ tiền".
+    expect($ten)->toContain('doanh_thu')
+        ->and($ten)->toContain('doanhThu')
+        ->and($ten)->toContain('laiGop')
+        ->and($ten)->toContain('margin');
+
+    // Và dòng chia cuối cùng phải bị bắt.
+    $mau = "/\b({$cotTien}|".implode('|', $ten).')\b/';
+    expect(preg_match($mau, '$margin = $laiGop / $doanhThu;'))->toBe(1);
 });
 
 it('bản thân bộ quét bắt được đúng kiểu code sai', function () {

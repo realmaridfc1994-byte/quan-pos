@@ -44,6 +44,17 @@ final class UpdateOrderItemStatus
     public function handle(UpdateOrderItemStatusData $data): OrderItem
     {
         return DB::transaction(function () use ($data): OrderItem {
+            // Khoá PHIẾU BẾP trước rồi mới tới DÒNG MÓN — đúng chiều với
+            // CancelOrderItem (sửa 12/08, review Phase 3 Bước 10). Trước đây
+            // Action này khoá ngược lại: dòng món → tồn kho → phiếu bếp, trong
+            // khi CancelOrderItem khoá phiếu bếp → dòng món. Hai bên giữ chặt
+            // cái bên kia đang chờ, thành kẹt chéo: MySQL huỷ một bên và thu
+            // ngân nhận một thông báo lỗi khó hiểu. Phase 3 còn nhét cả công
+            // đoạn trừ kho vào giữa hai lần khoá, kéo dài khoảng nguy hiểm.
+            $order = Order::query()->lockForUpdate()->findOrFail(
+                OrderItem::query()->whereKey($data->orderItemId)->value('order_id')
+            );
+
             $item = OrderItem::query()->lockForUpdate()->findOrFail($data->orderItemId);
 
             StatusTransition::kiemTra(self::CHUOI_MON, $item->status->value, OrderItemStatus::Served->value);
@@ -55,9 +66,11 @@ final class UpdateOrderItemStatus
 
             $caDangMo = Shift::query()->where('status', ShiftStatus::Open)->value('id');
 
+            // Trừ kho SAU khi đã cầm đủ cả hai khoá, và vẫn CÙNG transaction với
+            // việc đặt served_at (docs/schema.md K.9) — trừ kho hỏng thì
+            // served_at không được đặt.
             $this->deductStockForServedItem->handle($item, $data->updatedByUserId, $caDangMo);
 
-            $order = Order::query()->lockForUpdate()->findOrFail($item->order_id);
             $this->capNhatTrangThaiPhieu($order);
 
             return $item->refresh();

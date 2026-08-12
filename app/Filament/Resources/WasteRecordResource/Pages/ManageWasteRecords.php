@@ -22,12 +22,15 @@ final class ManageWasteRecords extends ManageRecords
             Actions\CreateAction::make()
                 ->using(function (array $data): StockMovement {
                     return app(WriteOffStock::class)->handle(new WriteOffStockData(
+                        uuid: (string) $data['uuid'],
                         ingredientId: (int) $data['ingredient_id'],
                         category: WasteReasonCategory::from($data['category']),
                         detail: (string) $data['detail'],
                         qty: (int) $data['qty'],
                         createdByUserId: (int) auth()->id(),
                         shiftId: null,
+                        approverUserId: filled($data['approver_user_id'] ?? null) ? (int) $data['approver_user_id'] : null,
+                        approverPin: filled($data['approver_pin'] ?? null) ? (string) $data['approver_pin'] : null,
                     ));
                 }),
         ];

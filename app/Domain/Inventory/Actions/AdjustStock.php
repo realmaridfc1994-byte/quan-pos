@@ -27,6 +27,9 @@ use App\Exceptions\DomainException;
  * VerifyApproverPin chạy trước, RecordStockMovement (tự mở transaction
  * riêng) chạy sau.
  *
+ * StockMovement được dùng ở đây CHỈ để ĐỌC (tra mã vân tay xem đã ghi chưa) —
+ * mọi việc ghi sổ cái vẫn đi qua RecordStockMovement, một cửa duy nhất.
+ *
  * Ghi type = 'adjust' — TÁCH RIÊNG khỏi 'waste' để Bước 8 báo cáo lọc được
  * chính xác qua cột type có sẵn (ck_stock_movements_adjust bắt buộc DB có
  * approved_by_user_id và reason ≥ 10 ký tự — K12).
@@ -56,6 +59,16 @@ final class AdjustStock
             throw new DomainException('Lý do điều chỉnh phải ghi rõ ràng, tối thiểu '.self::DO_DAI_LY_DO_TOI_THIEU.' ký tự — không được ghi qua loa.');
         }
 
+        // Bấm lại lần hai với cùng mã vân tay: trả về đúng dòng cũ NGAY, trước
+        // cả bước hỏi PIN. Nếu để sau, mỗi lần bấm lại đẻ thêm một dòng
+        // 'pin-verify' trong nhật ký hoạt động dù chẳng có gì được ghi thêm.
+        // Đọc không khoá, ngoài giao dịch — RecordStockMovement vẫn kiểm lại
+        // lần nữa BÊN TRONG giao dịch, đó mới là chốt chặn thật.
+        $daGhi = StockMovement::query()->where('uuid', $data->uuid)->first();
+        if ($daGhi !== null) {
+            return $daGhi;
+        }
+
         $nguoiDuyet = $this->verifyApproverPin->handle(new PinVerifyData(
             userId: $data->approverUserId,
             pin: $data->approverPin,
@@ -67,6 +80,7 @@ final class AdjustStock
         }
 
         return $this->recordStockMovement->handle(new RecordStockMovementData(
+            uuid: $data->uuid,
             ingredientId: $data->ingredientId,
             type: StockMovementType::Adjust,
             qtyDelta: $data->qtyDelta,

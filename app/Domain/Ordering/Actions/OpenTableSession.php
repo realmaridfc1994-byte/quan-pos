@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Ordering\Actions;
 
+use App\Domain\Inventory\Models\StockTake;
 use App\Domain\Ordering\DTO\OpenTableSessionData;
 use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\DiningTable;
@@ -46,6 +47,16 @@ final class OpenTableSession
             $daCo = TableSession::query()->where('uuid', $data->uuid)->first();
             if ($daCo !== null) {
                 return $daCo;
+            }
+
+            // K18 — kho phải đứng yên trong lúc phiếu kiểm kê đang mở. Chốt này
+            // là NỬA CÒN LẠI của chốt trong RecordStockMovement: bán món không
+            // bao giờ bị chặn (bếp không bao giờ bị chặn báo món xong), nên chỗ
+            // duy nhất chặn được luồng bán là ngay đây, trước khi có bàn nào mở.
+            // OpenStockTake đã từ chối mở phiếu khi còn bàn chưa tính tiền xong,
+            // nên hai chốt khép kín: không bàn nào mở thì không món nào để bấm.
+            if (StockTake::dangCoPhieuMo()) {
+                throw new DomainException('Đang kiểm kê kho — chưa mở bàn mới được. Chốt phiếu kiểm kê xong rồi mở bàn.');
             }
 
             // Khoá dòng ca TRƯỚC khi tạo lượt khách (luật CLAUDE.md mục 11: Shift →

@@ -1951,6 +1951,23 @@ CREATE TABLE stock_reconciliation_notes (
 | **K15** | Hàng hỏng vỡ bắt buộc ghi lý do | **DB** `ck_stock_movements_waste_reason` |
 | **K16** | Ghi hai lần cùng một mã vân tay chỉ ra một dòng sổ cái | **DB** `uq_stock_movements_uuid` + code |
 | **K17** | Một dòng sổ cái mồ côi chỉ được xác nhận "đã xem" đúng một lần, và phải đủ ai/khi nào/vì sao | **DB** `uq_srn_one_note_per_movement`, `ck_srn_reason` + code |
+| **K18** | Kho phải ĐỨNG YÊN trong lúc một phiếu kiểm kê đang mở | Code (`RecordStockMovement`, `OpenTableSession`, `OpenStockTake`) |
+
+**K18 — vì sao phải có, và vì sao nó không nằm ở database** (thêm 12/08, Phase 3 Bước 10 sau review Opus).
+
+`OpenStockTake` chụp tồn hệ thống vào `stock_take_items.system_qty` lúc MỞ phiếu rồi đóng băng. `CloseStockTake` lấy `diff_qty = counted_qty − system_qty` và **cộng vào tồn HIỆN TẠI**. Chuỗi đó chỉ đúng khi kho đứng im từ lúc mở phiếu tới lúc đếm xong. Trước bản sửa này chỉ có chốt lúc *mở* phiếu ("còn bàn chưa tính tiền xong thì không mở được"), còn sau khi phiếu đã mở thì nhập hàng, hao hụt, điều chỉnh, mở bàn bán tiếp đều tự do.
+
+Hậu quả đã dựng lại được: tồn 100 → mở phiếu → xe hàng tới nhập 20 (tồn 120) → nhân viên đếm tay thấy đúng 120 → chốt phiếu cộng thêm 20 nữa → **hệ thống ghi 140**. Không lỗi nào nổ, và **job đối soát Bước 9 vẫn báo "sạch"** vì K2/K3 chỉ so sổ cái với bảng tồn, mà hai thứ đó vẫn khớp nhau từng đồng. Chính công cụ dùng để phát hiện lệch kho lại đang tạo ra lệch kho, âm thầm, mỗi lần kiểm kê.
+
+Chốt được đặt ở **ba chỗ, khép kín**:
+
+1. `RecordStockMovement` từ chối ghi khi còn phiếu kiểm kê đang mở — chặn nhập hàng, hao hụt, điều chỉnh tay, trả hàng.
+2. `OpenTableSession` từ chối mở bàn mới. Cần thiết vì **bán món KHÔNG BAO GIỜ bị chặn** (K.9 — bếp không bao giờ bị chặn báo món xong); chặn ở đầu trên là cách duy nhất giữ luồng bán đứng yên mà không đụng tới bếp.
+3. `OpenStockTake` (đã có sẵn) từ chối mở phiếu khi còn bàn chưa tính tiền xong. Cùng với (2): không bàn nào mở thì không món nào để bấm xong.
+
+Ngoại lệ duy nhất: chính `CloseStockTake` — nó ghi các dòng điều chỉnh trong lúc phiếu vẫn còn `open`, chỉ đổi trạng thái ở cuối. Xem `StockTake::choPhepGhiKhiChotPhieu()`, cùng khuôn `StockBalance::choPhepGhi()`.
+
+Vì sao không đặt ở database: ràng buộc này là "bảng A đang có dòng trạng thái X thì cấm ghi bảng B", loại điều kiện mà CHECK không diễn tả được, và làm bằng trigger thì phải nhét vào mọi đường ghi kèm một cửa ngoại lệ cho `CloseStockTake` — phức tạp hơn thứ nó bảo vệ. Chốt code + test là đủ, vì `RecordStockMovement` vốn đã là cửa duy nhất.
 
 **K1 được giữ bằng HAI lớp, không phải một** (thêm ngày 12/08, Phase 3 Bước 10). Chốt ở tầng Model chỉ bắt được code đi qua Eloquent; một câu `DB::table('stock_movements')->update(...)` hay một dòng SQL gõ tay trong phpMyAdmin đi vòng qua nó. Nên có thêm trigger ở tầng database:
 
@@ -1963,7 +1980,9 @@ BEGIN
 END
 ```
 
-Trigger chỉ chặn UPDATE — INSERT là việc của `RecordStockMovement`, còn xoá đã bị chặn ở tầng Model và bị các khoá ngoại trỏ vào sổ cái chặn phần lớn. Câu thông báo cố ý viết không dấu: nó nằm trong định nghĩa trigger, không phải trong bảng dữ liệu, nên không chắc đi qua được mọi bảng mã trên đường từ MariaDB ra màn hình.
+**Từ 12/08 (review Bước 10) có thêm trigger thứ hai chặn XOÁ**, `trg_stock_movements_no_delete`, cùng khuôn. Lý lẽ cũ — "xoá đã bị chặn ở tầng Model và bị các khoá ngoại chặn phần lớn" — không đủ: *phần lớn* không phải *tất cả*. Một dòng sổ cái không phải dòng cuối của nguyên liệu nào (không bị `stock_balances.last_movement_id` trỏ tới) và chưa có ghi chú mồ côi thì **không khoá ngoại nào giữ**, xoá được sạch sẽ bằng một câu SQL gõ tay — và xoá đúng một dòng như vậy làm tổng sổ cái lệch khỏi bảng tồn vĩnh viễn, đúng thứ K2/K3 tồn tại để chặn.
+
+INSERT vẫn tự do — đó là việc của `RecordStockMovement`. Câu thông báo cố ý viết không dấu: nó nằm trong định nghĩa trigger, không phải trong bảng dữ liệu, nên không chắc đi qua được mọi bảng mã trên đường từ MariaDB ra màn hình.
 
 **Hệ quả đã cân nhắc:** sau trigger này không còn đường nào vá tay một cột trên sổ cái, kể cả lệnh `stock:backfill-uuid`. Chấp nhận có chủ đích — migration `2026_08_11_000002` đã siết `uuid NOT NULL` nên không thể còn dòng nào cần vá; nếu tương lai thật sự cần sửa thì đó phải là một quyết định có ý thức (tạm gỡ trigger), không phải một câu UPDATE lỡ tay.
 

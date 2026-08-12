@@ -531,7 +531,7 @@ BỔ SUNG cho prompt Bước 4:
 
 - [ ] Xác nhận đã sửa `now()` → `opened_at` trong hai hàm sinh mã *(chủ dự án báo đã xong 04/08)*
 - [ ] Chạy `./vendor/bin/pest` **năm lần liên tiếp**, cả năm xanh cùng một số test
-- [ ] `phpunit.xml` đã đổi `DB_CONNECTION` sang `mariadb`, và không test nào đổi kết quả sau khi đổi
+- [x] `phpunit.xml` đã đổi `DB_CONNECTION` sang `mariadb`, và không test nào đổi kết quả sau khi đổi *(xong ở commit `1ce52ae`; tick ngày 11/08 — ô chưa tick này là một trong những lý do chuyện "quay về mysql" tái phát bốn lần. Từ nay `tests/Feature/Support/DatabaseDriverTest.php` gác thay cho trí nhớ)*
 - [ ] Bước 3 xong: rút dây mạng, gọi 3 món, gửi bếp — tem vẫn in ra
 
 Ba việc đầu là dọn dẹp còn sót từ Bước 2. Việc thứ tư là điều kiện cần — không có hàng chờ thì không có gì để đồng bộ.

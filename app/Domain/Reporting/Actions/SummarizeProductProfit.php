@@ -8,6 +8,7 @@ use App\Domain\Inventory\Enums\StockMovementRefType;
 use App\Domain\Inventory\Models\StockMovement;
 use App\Domain\Ordering\Enums\OrderItemStatus;
 use App\Domain\Ordering\Enums\OrderStatus;
+use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Reporting\Models\ProductProfitDaily;
@@ -43,6 +44,34 @@ use Illuminate\Support\Facades\DB;
  * không tính lại theo giá vốn hiện tại (cùng tinh thần CLAUDE.md mục 10: số
  * trên hoá đơn được chốt, không tính lại về sau). Món không trừ kho
  * (deducts_stock=false) không có dòng sổ cái nào → cost_amount = 0.
+ *
+ * ── Hai con số "độ tin cậy" (Bước 10) ────────────────────────────────────
+ * cost_amount = 0 có thể nghĩa là "món này thật sự không tốn nguyên liệu",
+ * nhưng cũng có thể nghĩa là "không ai biết nó tốn bao nhiêu". Hai trường hợp
+ * sau làm lãi gộp trông CAO HƠN thật, và trước đây không cột nào ghi lại:
+ *
+ *   - qty_no_cost: bán lúc kho đang âm. Sổ cái vẫn ghi dòng nhưng
+ *     has_cost = false và cost_delta = 0 — giá vốn KHÔNG XÁC ĐỊNH ĐƯỢC, chứ
+ *     không phải bằng 0. Một phần lẩu ăn 5 nguyên liệu mà chỉ cần MỘT nguyên
+ *     liệu rơi vào cảnh này là cả phần đó không tin được, nên đếm cả phần.
+ *   - qty_not_served: bếp quên bấm "xong". Không có served_at thì
+ *     DeductStockForServedItem chưa chạy, không có dòng sổ cái nào, nhưng
+ *     doanh thu vẫn tính đủ vì line_amount không phụ thuộc served_at. Chỉ
+ *     đếm khi lượt khách ĐÃ ĐÓNG — bàn còn đang ăn dở thì món chưa bưng ra
+ *     là chuyện bình thường, chưa phải sai sót.
+ *
+ * Hai con số này KHÔNG sửa cost_amount và KHÔNG bịa giá vốn cho dòng nào.
+ *
+ * ── Lượt khách bị huỷ cả lượt (sửa 12/08, review Phase 3 Bước 10) ────────
+ * VoidTableSession chỉ đổi trạng thái LƯỢT KHÁCH sang "void", cố tình KHÔNG
+ * đụng tới các dòng món bên trong (H1: huỷ từng dòng phải ghi ai/lúc nào/vì
+ * sao, đó là quyết định của người). Trước đây Action này chỉ lọc theo trạng
+ * thái dòng món và phiếu bếp, nên món của một bill khách bỏ về không trả tiền
+ * vẫn được cộng vào doanh thu — trong khi báo cáo doanh thu ngày lấy từ các
+ * phiếu thu nên đếm 0 đồng. Hai màn hình cãi nhau, không ai giải thích được.
+ *
+ * Kho thì KHÔNG hoàn lại (K6 — món đã bưng ra là đã ăn mất thật), nên dòng sổ
+ * cái vẫn còn nguyên; chỉ doanh thu là tiền chưa từng thu, phải bỏ ra.
  */
 final class SummarizeProductProfit
 {
@@ -54,7 +83,10 @@ final class SummarizeProductProfit
             $dongMonHomNay = OrderItem::query()
                 ->whereHas('order', fn ($q) => $q
                     ->whereDate('sent_at', $ngay)
-                    ->where('status', '!=', OrderStatus::Cancelled))
+                    ->where('status', '!=', OrderStatus::Cancelled)
+                    // Lượt khách bị huỷ cả lượt (khách bỏ về không trả tiền)
+                    // KHÔNG mang doanh thu — xem ghi chú ở đầu file.
+                    ->whereHas('tableSession', fn ($qq) => $qq->where('status', '!=', TableSessionStatus::Void)))
                 ->where('status', '!=', OrderItemStatus::Cancelled)
                 ->with('order:id,table_session_id')
                 ->get();
@@ -68,10 +100,12 @@ final class SummarizeProductProfit
             $idPhienLienQuan = $dongMonHomNay->pluck('order.table_session_id')->unique()->values();
             $doanhThuTheoDongMon = $this->tinhDoanhThuDaPhanBoGiamGia($idPhienLienQuan);
             $giaVonTheoDongMon = $this->tinhGiaVonTheoDongMon($dongMonHomNay->pluck('id'));
+            $idThieuGiaVon = $this->idDongMonThieuGiaVon($dongMonHomNay->pluck('id'));
+            $idPhienDaDong = $this->idPhienDaDong($idPhienLienQuan);
 
             return $dongMonHomNay
                 ->groupBy(fn (OrderItem $item): string => "{$item->product_id}:{$item->product_variant_id}")
-                ->map(function (Collection $nhom) use ($ngay, $doanhThuTheoDongMon, $giaVonTheoDongMon): ProductProfitDaily {
+                ->map(function (Collection $nhom) use ($ngay, $doanhThuTheoDongMon, $giaVonTheoDongMon, $idThieuGiaVon, $idPhienDaDong): ProductProfitDaily {
                     $mauDau = $nhom->first();
 
                     return ProductProfitDaily::query()->create([
@@ -81,6 +115,13 @@ final class SummarizeProductProfit
                         'quantity_sold' => $nhom->sum('quantity'),
                         'revenue_amount' => $nhom->sum(fn (OrderItem $i) => $doanhThuTheoDongMon[$i->id] ?? $i->line_amount),
                         'cost_amount' => $nhom->sum(fn (OrderItem $i) => $giaVonTheoDongMon[$i->id] ?? 0),
+                        'qty_no_cost' => $nhom
+                            ->filter(fn (OrderItem $i): bool => in_array($i->id, $idThieuGiaVon, true))
+                            ->sum('quantity'),
+                        'qty_not_served' => $nhom
+                            ->filter(fn (OrderItem $i): bool => $i->served_at === null
+                                && in_array((int) $i->order->table_session_id, $idPhienDaDong, true))
+                            ->sum('quantity'),
                     ]);
                 })
                 ->values();
@@ -128,6 +169,39 @@ final class SummarizeProductProfit
         }
 
         return $ketQua;
+    }
+
+    /**
+     * Dòng món có ÍT NHẤT MỘT dòng sổ cái không xác định được giá vốn
+     * (has_cost = false, tức là lúc trừ kho thì tồn đang âm).
+     *
+     * @param  Collection<int, int>  $idDongMon
+     * @return list<int> danh sách order_item_id
+     */
+    private function idDongMonThieuGiaVon(Collection $idDongMon): array
+    {
+        return StockMovement::query()
+            ->where('ref_type', StockMovementRefType::OrderItem)
+            ->whereIn('ref_id', $idDongMon)
+            ->where('has_cost', false)
+            ->distinct()
+            ->pluck('ref_id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+    }
+
+    /**
+     * @param  Collection<int, int>  $idPhien
+     * @return list<int> danh sách table_session_id đã đóng
+     */
+    private function idPhienDaDong(Collection $idPhien): array
+    {
+        return TableSession::query()
+            ->whereIn('id', $idPhien)
+            ->where('status', TableSessionStatus::Closed)
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
     }
 
     /**

@@ -53,24 +53,35 @@ final class CloseStockTake
             // (12/08). Lý do: cost_delta là chênh lệch CÓ DẤU (kiểm kê thiếu ra
             // số âm), còn Money chặn số âm theo đúng thiết kế của nó. Ép qua
             // Money sẽ nổ lỗi ở đúng trường hợp bình thường nhất.
-            $tongChenhLech = 0;
-            foreach ($dongLech as $dong) {
-                $movement = $this->recordStockMovement->handle(new RecordStockMovementData(
-                    uuid: StockMovementUuid::tuChungTu(StockMovementRefType::StockTakeItem, $dong->id, $dong->ingredient_id),
-                    ingredientId: $dong->ingredient_id,
-                    type: StockMovementType::Stocktake,
-                    qtyDelta: $dong->diff_qty,
-                    knownCost: null,
-                    refType: StockMovementRefType::StockTakeItem,
-                    refId: $dong->id,
-                    reason: null,
-                    approvedByUserId: null,
-                    createdByUserId: $data->closedByUserId,
-                    shiftId: null,
-                ));
+            // Mở cửa cho chính mình: từ 12/08 RecordStockMovement từ chối ghi
+            // khi còn phiếu kiểm kê đang mở (K18 — kho phải đứng yên trong lúc
+            // kiểm kê). Phiếu này vẫn đang "open" ngay lúc các dòng điều chỉnh
+            // được ghi, chỉ đóng lại ở cuối — không có cửa này thì phiếu kiểm kê
+            // tự chặn chính nó. Cùng khuôn StockBalance::choPhepGhi(): cờ luôn
+            // được tắt lại kể cả khi bên trong ném lỗi.
+            $tongChenhLech = StockTake::choPhepGhiKhiChotPhieu(function () use ($dongLech, $data): int {
+                $tong = 0;
 
-                $tongChenhLech += $movement->cost_delta;
-            }
+                foreach ($dongLech as $dong) {
+                    $movement = $this->recordStockMovement->handle(new RecordStockMovementData(
+                        uuid: StockMovementUuid::tuChungTu(StockMovementRefType::StockTakeItem, $dong->id, $dong->ingredient_id),
+                        ingredientId: $dong->ingredient_id,
+                        type: StockMovementType::Stocktake,
+                        qtyDelta: $dong->diff_qty,
+                        knownCost: null,
+                        refType: StockMovementRefType::StockTakeItem,
+                        refId: $dong->id,
+                        reason: null,
+                        approvedByUserId: null,
+                        createdByUserId: $data->closedByUserId,
+                        shiftId: null,
+                    ));
+
+                    $tong += $movement->cost_delta;
+                }
+
+                return $tong;
+            });
 
             $phieu->update([
                 'status' => StockTakeStatus::Closed,

@@ -34,6 +34,8 @@ final class ProductProfitDaily extends Model
         'quantity_sold',
         'revenue_amount',
         'cost_amount',
+        'qty_no_cost',
+        'qty_not_served',
     ];
 
     protected function casts(): array
@@ -43,6 +45,8 @@ final class ProductProfitDaily extends Model
             'quantity_sold' => 'integer',
             'revenue_amount' => 'integer',
             'cost_amount' => 'integer',
+            'qty_no_cost' => 'integer',
+            'qty_not_served' => 'integer',
             'profit_amount' => 'integer',
         ];
     }

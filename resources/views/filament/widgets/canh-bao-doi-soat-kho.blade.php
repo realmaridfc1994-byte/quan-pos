@@ -55,5 +55,35 @@
                 </div>
             @endif
         @endif
+
+        {{-- Hai mục CẢNH BÁO: hiện cả khi sổ cái sạch, vì đây là việc cần dọn
+             chứ không phải sổ sách sai. --}}
+        @if ($daChay && (! empty($thieuGiaVon) || ! empty($quenBamXong)))
+            <div class="mt-4 border-t border-gray-200 pt-3 dark:border-gray-700">
+                <p class="mb-2 text-sm font-medium text-warning-600 dark:text-warning-400">⚠️ Việc cần dọn (không phải lỗi sổ sách):</p>
+
+                @if (! empty($thieuGiaVon))
+                    <div class="mb-3">
+                        <h4 class="mb-1 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Bán lúc kho âm — chưa biết giá vốn</h4>
+                        <ul class="list-inside list-disc text-sm">
+                            @foreach ($thieuGiaVon as $dong)
+                                <li>{{ $dong['ingredient_name'] }}: {{ $dong['so_dong'] }} dòng</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                @endif
+
+                @if (! empty($quenBamXong))
+                    <div>
+                        <h4 class="mb-1 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Đã tính tiền mà bếp chưa bấm xong</h4>
+                        <ul class="list-inside list-disc text-sm">
+                            @foreach ($quenBamXong as $dong)
+                                <li>#{{ $dong['order_item_id'] }} {{ $dong['product_name'] }} — {{ $dong['variant_name'] }} (lượt khách {{ $dong['table_session_code'] }}, đóng {{ $dong['closed_at'] }})</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                @endif
+            </div>
+        @endif
     </x-filament::section>
 </x-filament-widgets::widget>

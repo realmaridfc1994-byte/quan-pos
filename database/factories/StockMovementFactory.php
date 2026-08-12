@@ -10,6 +10,7 @@ use App\Domain\Inventory\Models\Ingredient;
 use App\Domain\Inventory\Models\StockMovement;
 use App\Domain\Staffing\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
 
 /**
  * @extends Factory<StockMovement>
@@ -23,6 +24,9 @@ class StockMovementFactory extends Factory
         $qtyDelta = fake()->numberBetween(1, 100);
 
         return [
+            // Giữ Str::uuid() theo ngoại lệ ở CLAUDE.md mục 4.23 — không gian
+            // giá trị của uuid lớn tới mức trùng không phải rủi ro thực tế.
+            'uuid' => (string) Str::uuid(),
             'ingredient_id' => Ingredient::factory(),
             'type' => StockMovementType::Purchase,
             'qty_delta' => $qtyDelta,

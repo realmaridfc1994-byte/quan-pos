@@ -17,6 +17,9 @@ use App\Domain\Inventory\DTO\RecordStockMovementData;
 use App\Domain\Inventory\Enums\StockMovementRefType;
 use App\Domain\Inventory\Enums\StockMovementType;
 use App\Domain\Inventory\Models\Ingredient;
+use App\Domain\Inventory\Models\StockMovement;
+use App\Domain\Ordering\Actions\VoidTableSession;
+use App\Domain\Ordering\DTO\VoidTableSessionData;
 use App\Domain\Ordering\Enums\OrderItemStatus;
 use App\Domain\Ordering\Models\Order;
 use App\Domain\Ordering\Models\OrderItem;
@@ -306,4 +309,77 @@ it('bàn còn đang ăn dở, món chưa bưng ra thì KHÔNG tính là bếp qu
     app(SummarizeProductProfit::class)->handle($ngay->toDateString());
 
     expect(ProductProfitDaily::query()->where('product_variant_id', $bienThe->id)->sole()->qty_not_served)->toBe(0);
+});
+
+/**
+ * Lượt khách bị huỷ CẢ LƯỢT — khách bỏ về không trả tiền (sửa 12/08, review
+ * Phase 3 Bước 10).
+ *
+ * VoidTableSession cố ý KHÔNG đụng tới các dòng món bên trong (H1: huỷ từng
+ * dòng phải ghi ai/lúc nào/vì sao). Trước đây báo cáo lãi gộp chỉ lọc theo
+ * trạng thái dòng món và phiếu bếp, nên tiền của một bill chưa từng thu vẫn
+ * được cộng vào doanh thu — trong khi báo cáo doanh thu ngày lấy từ phiếu thu
+ * nên đếm 0 đồng. Hai màn hình cãi nhau.
+ */
+it('lượt khách bị huỷ cả lượt KHÔNG mang doanh thu, nhưng kho vẫn không hoàn lại', function () {
+    $ngay = Carbon::parse('2026-08-10');
+    $chuQuan = User::factory()->owner()->create();
+
+    $ga = Ingredient::factory()->create();
+    app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
+        ingredientId: $ga->id,
+        type: StockMovementType::Purchase,
+        qtyDelta: 1_000,
+        knownCost: 1_000_000,
+        refType: StockMovementRefType::Manual,
+        refId: null,
+        reason: null,
+        approvedByUserId: null,
+        createdByUserId: $chuQuan->id,
+        shiftId: null,
+    ));
+
+    $ca = Shift::factory()->closed()->create(['opened_at' => $ngay->clone()->setTime(18, 0)]);
+    $session = TableSession::factory()->withTable()->create([
+        'shift_id' => $ca->id,
+        'opened_at' => $ngay->clone()->setTime(18, 10),
+        'subtotal_amount' => 90_000,
+        'discount_amount' => 0,
+        'total_amount' => 90_000,
+    ]);
+
+    $category = Category::factory()->create();
+    $mon = Product::factory()->for($category)->create();
+    $bienThe = ProductVariant::factory()->for($mon)->create(['price' => 30_000]);
+
+    $order = Order::factory()->for($session, 'tableSession')->create(['sent_at' => $ngay->clone()->setTime(18, 15)]);
+    $item = OrderItem::factory()->for($order, 'order')->create([
+        'product_id' => $mon->id, 'product_variant_id' => $bienThe->id,
+        'unit_price' => 30_000, 'options_amount' => 0, 'quantity' => 3,
+        'status' => OrderItemStatus::Served, 'served_at' => $ngay->clone()->setTime(18, 30),
+    ]);
+
+    // Món đã bưng ra, kho đã trừ thật.
+    ghiGiaVonChoDongMon($ga, $item, 30, $chuQuan);
+
+    // Khách bỏ về, chưa trả đồng nào → huỷ cả lượt.
+    app(VoidTableSession::class)->handle(
+        new VoidTableSessionData(
+            tableSessionId: $session->id,
+            reason: 'Khách bỏ về không trả tiền',
+            voidedByUserId: $chuQuan->id,
+        )
+    );
+
+    app(SummarizeProductProfit::class)->handle($ngay->toDateString());
+
+    // Không dòng lãi gộp nào — doanh thu chưa từng có thì không được ghi.
+    expect(ProductProfitDaily::query()->count())->toBe(0);
+
+    // Nhưng gà thì đã nấu mất thật: sổ cái kho giữ nguyên, không hoàn lại (K6).
+    expect(StockMovement::query()
+        ->where('ref_type', StockMovementRefType::OrderItem)
+        ->where('ref_id', $item->id)
+        ->count())->toBe(1);
 });

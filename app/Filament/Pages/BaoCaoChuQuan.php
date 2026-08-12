@@ -7,9 +7,11 @@ namespace App\Filament\Pages;
 use App\Domain\Staffing\Enums\UserRole;
 use App\Filament\Widgets\BanChayLaiThapWidget;
 use App\Filament\Widgets\CanhBaoDoiSoatKhoWidget;
+use App\Filament\Widgets\CanhBaoThieuGiaVonWidget;
 use App\Filament\Widgets\DoanhThu7NgayWidget;
 use App\Filament\Widgets\DoanhThuTongQuanWidget;
 use App\Filament\Widgets\HaoHutThangNayWidget;
+use App\Filament\Widgets\HaoHutTheoNguoiGhiWidget;
 use App\Filament\Widgets\LaiGopTheoMonWidget;
 use App\Filament\Widgets\TonThapWidget;
 use App\Filament\Widgets\Top10MonBanChayWidget;
@@ -44,12 +46,16 @@ final class BaoCaoChuQuan extends Page
     protected function getHeaderWidgets(): array
     {
         return [
+            // ĐẦU TIÊN có chủ ý: cảnh báo "số dưới đây không đáng tin" phải
+            // đọc được TRƯỚC khi người ta tin vào bảng lãi gộp bên dưới.
+            CanhBaoThieuGiaVonWidget::class,
             DoanhThuTongQuanWidget::class,
             DoanhThu7NgayWidget::class,
             Top10MonBanChayWidget::class,
             LaiGopTheoMonWidget::class,
             BanChayLaiThapWidget::class,
             HaoHutThangNayWidget::class,
+            HaoHutTheoNguoiGhiWidget::class,
             TonThapWidget::class,
             CanhBaoDoiSoatKhoWidget::class,
         ];

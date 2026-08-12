@@ -87,22 +87,72 @@ function taoPhieuKiemKeDaChot(User $nguoi, int $demDuoc = 95): StockTake
 }
 
 /**
- * Giả lập "sổ cái mất một dòng" — thứ đối soát sinh ra để bắt.
+ * Dựng hiện trường "chứng từ có mà sổ cái không có" — thứ đối soát sinh ra để bắt.
  *
- * Phải đi thẳng bằng SQL vì tầng Model đã khoá cứng không cho xoá sổ cái, và
- * phải gỡ tham chiếu stock_balances.last_movement_id trước, không thì khoá
- * ngoại chặn. Đây là dựng hiện trường trong test, KHÔNG phải cách làm được
- * phép ở tầng sản xuất.
+ * Trước 12/08 hai hàm dưới đây dựng cảnh bằng cách XOÁ dòng sổ cái bằng SQL thô.
+ * Không dùng được nữa: sổ cái giờ đã khoá cấm xoá ở tầng database
+ * (trg_stock_movements_no_delete), và đó đúng là điều mong muốn.
+ *
+ * Cách mới thật hơn cách cũ: KHÔNG BAO GIỜ tạo dòng sổ cái ngay từ đầu — đổi
+ * trạng thái chứng từ bằng SQL thô mà không đi qua Action. Đây chính là hình
+ * dạng của con bug ngoài đời (ai đó vá trạng thái bằng tay, hoặc một Action
+ * tương lai quên gọi RecordStockMovement), chứ không phải cảnh "sổ cái tự bốc
+ * hơi" mà giờ đã thành bất khả thi.
  */
-function xoaDongSoCaiBangSql(StockMovementRefType $refType, int $refId): void
+function taoPhieuNhapDaNhanNhungThieuSoCai(User $nguoi): Purchase
 {
-    $ids = DB::table('stock_movements')
-        ->where('ref_type', $refType->value)
-        ->where('ref_id', $refId)
-        ->pluck('id');
+    $bia = Ingredient::factory()->create();
+    IngredientUnit::factory()->for($bia, 'ingredient')->create(['unit_name' => 'Thùng', 'factor' => 24]);
 
-    DB::table('stock_balances')->whereIn('last_movement_id', $ids)->update(['last_movement_id' => null]);
-    DB::table('stock_movements')->whereIn('id', $ids)->delete();
+    $phieu = app(CreatePurchase::class)->handle(new CreatePurchaseData(
+        supplierId: Supplier::factory()->create()->id,
+        note: null,
+        invoiceNo: null,
+        lines: [new PurchaseLineData(ingredientId: $bia->id, unitName: 'Thùng', qtyInput: 5, unitCost: 300_000)],
+        createdByUserId: $nguoi->id,
+    ));
+
+    // Đánh dấu đã nhận mà KHÔNG đi qua ReceivePurchase — không dòng sổ cái nào ra đời.
+    DB::table('purchases')->where('id', $phieu->id)->update([
+        'status' => PurchaseStatus::Received->value,
+        'received_at' => now(),
+        'received_by_user_id' => $nguoi->id,
+    ]);
+
+    return $phieu->refresh();
+}
+
+function taoPhieuKiemKeDaChotNhungThieuSoCai(User $nguoi, int $demDuoc = 95): StockTake
+{
+    $bia = Ingredient::factory()->create();
+
+    app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
+        ingredientId: $bia->id,
+        type: StockMovementType::Purchase,
+        qtyDelta: 100,
+        knownCost: 500_000,
+        refType: StockMovementRefType::Manual,
+        refId: null,
+        reason: null,
+        approvedByUserId: null,
+        createdByUserId: $nguoi->id,
+        shiftId: null,
+    ));
+
+    $phieu = app(OpenStockTake::class)->handle(new OpenStockTakeData(note: null, openedByUserId: $nguoi->id));
+    $dong = $phieu->items()->where('ingredient_id', $bia->id)->sole();
+    app(RecordStockTakeCount::class)->handle(new RecordStockTakeCountData($dong->id, $demDuoc));
+
+    // Chốt phiếu mà KHÔNG đi qua CloseStockTake — không dòng sổ cái nào ra đời.
+    DB::table('stock_takes')->where('id', $phieu->id)->update([
+        'status' => StockTakeStatus::Closed->value,
+        'closed_at' => now(),
+        'closed_by_user_id' => $nguoi->id,
+        'total_diff_cost' => 0,
+    ]);
+
+    return $phieu->refresh();
 }
 
 // ── NHÁNH NHẬP HÀNG (mục 6) ─────────────────────────────────────────────────
@@ -118,10 +168,9 @@ it('nhận hàng đúng luồng thì nhánh nhập hàng sạch', function () {
 });
 
 it('BUG CŨ: phiếu đã nhận mà THIẾU dòng sổ cái không ai phát hiện — nay báo đỏ', function () {
-    $phieu = taoPhieuNhapDaNhan($this->chuQuan);
+    $phieu = taoPhieuNhapDaNhanNhungThieuSoCai($this->chuQuan);
 
     $dong = $phieu->items()->sole();
-    xoaDongSoCaiBangSql(StockMovementRefType::PurchaseItem, $dong->id);
 
     $ketQua = $this->action->handle();
 
@@ -176,10 +225,8 @@ it('kiểm kê chốt đúng luồng thì nhánh kiểm kê sạch', function ()
 });
 
 it('BUG CŨ: dòng kiểm kê lệch đã chốt mà THIẾU sổ cái không ai phát hiện — nay báo đỏ', function () {
-    $phieu = taoPhieuKiemKeDaChot($this->chuQuan);
+    $phieu = taoPhieuKiemKeDaChotNhungThieuSoCai($this->chuQuan);
     $dong = $phieu->items()->where('diff_qty', '<>', 0)->sole();
-
-    xoaDongSoCaiBangSql(StockMovementRefType::StockTakeItem, $dong->id);
 
     $ketQua = $this->action->handle();
 
