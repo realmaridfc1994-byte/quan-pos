@@ -9,6 +9,7 @@ use App\Domain\Inventory\Enums\StockMovementRefType;
 use App\Domain\Inventory\Enums\StockMovementType;
 use App\Domain\Inventory\Models\StockMovement;
 use App\Domain\Ordering\Models\OrderItem;
+use App\Support\StockMovementUuid;
 
 /**
  * Trừ kho theo định lượng cho MỘT dòng món khi bếp báo đã phục vụ.
@@ -32,6 +33,12 @@ use App\Domain\Ordering\Models\OrderItem;
  *
  * Nguyên liệu không đủ tồn vẫn cho trừ, để tồn về âm (quyết định đã chốt ở
  * K.9) — bếp không bao giờ bị chặn báo món xong vì lý do tồn kho.
+ *
+ * Dòng sổ cái mang giờ BẾP BÁO XONG (order_items.served_at), không phải giờ
+ * nó được ghi vào máy chủ (sửa 12/08, review mục 8.2-I). Hai giờ này trùng
+ * nhau ở luồng chạy thẳng, nhưng lệch hẳn một ngày với thao tác đến muộn qua
+ * đồng bộ — và báo cáo hao hụt/lãi gộp cắt theo ngày thì một dòng lệch ngày
+ * là một dòng nằm sai tháng.
  */
 final class DeductStockForServedItem
 {
@@ -64,6 +71,7 @@ final class DeductStockForServedItem
 
         foreach ($dinhLuong as $dong) {
             $this->recordStockMovement->handle(new RecordStockMovementData(
+                uuid: StockMovementUuid::tuChungTu(StockMovementRefType::OrderItem, $item->id, $dong->ingredient_id),
                 ingredientId: $dong->ingredient_id,
                 type: StockMovementType::Sale,
                 qtyDelta: -($dong->qty_base * $item->quantity),
@@ -74,6 +82,11 @@ final class DeductStockForServedItem
                 approvedByUserId: null,
                 createdByUserId: $performedByUserId,
                 shiftId: $shiftId,
+                // Giờ BẾP BÁO XONG, không phải giờ dòng sổ cái được ghi. Hai
+                // giờ này trùng nhau khi máy chạy thẳng, nhưng lệch hẳn một
+                // ngày khi thao tác đến muộn qua đồng bộ: món phục vụ 23h50
+                // mà máy POS đẩy lên lúc 0h10 phải nằm ở doanh thu hôm trước.
+                occurredAt: $item->served_at?->toImmutable(),
             ));
         }
     }

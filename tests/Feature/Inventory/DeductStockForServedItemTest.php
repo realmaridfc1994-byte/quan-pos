@@ -319,3 +319,87 @@ it('gọi lại trừ kho cho cùng dòng món vẫn chỉ ra một bộ dòng s
     expect(StockBalance::query()->find($ga->id)->qty)->toBe(5_000 - 300)
         ->and(StockBalance::query()->find($sa->id)->qty)->toBe(1_000 - 30);
 });
+
+/**
+ * Giờ ghi sổ cái = giờ BẾP BÁO XONG, không phải giờ máy chủ ghi dòng đó
+ * (review Phase 3 mục 8.2-I).
+ *
+ * BUG CŨ: occurredAt luôn để trống nên RecordStockMovement lấy now(). Ở luồng
+ * chạy thẳng hai giờ này trùng nhau, nên lỗi không lộ ra. Nó chỉ lộ với thao
+ * tác đến muộn — món phục vụ 23h50 mà dòng sổ cái ghi 0h10 hôm sau thì báo
+ * cáo hao hụt và lãi gộp cắt theo ngày sẽ xếp nó sai ngày, và nếu đó là đêm
+ * cuối tháng thì sai luôn tháng.
+ */
+it('món phục vụ trước nửa đêm mà trừ kho sau nửa đêm vẫn rơi đúng ngày cũ', function () {
+    $bia = Ingredient::factory()->create(['code' => 'T-DEM']);
+    nhapTonDau($bia, 100, 2_500_000, $this->user);
+
+    $bienThe = taoBienTheCoDinhLuong([[$bia, 1]]);
+    $dongMon = goiMonChoBienThe($this->luot, $bienThe, 2, $this->user);
+
+    $gioPhucVu = CarbonImmutable::parse('2026-08-11 23:50:00');
+    $dongMon->update(['status' => OrderItemStatus::Served, 'served_at' => $gioPhucVu]);
+
+    // Máy POS ngoại tuyến đẩy thao tác lên sau nửa đêm.
+    $this->travelTo(CarbonImmutable::parse('2026-08-12 00:10:00'));
+
+    app(DeductStockForServedItem::class)->handle($dongMon->fresh(), $this->user->id, $this->ca->id);
+
+    $dongSoCai = StockMovement::query()
+        ->where('ref_type', StockMovementRefType::OrderItem)
+        ->where('ref_id', $dongMon->id)
+        ->sole();
+
+    expect($dongSoCai->occurred_at->toDateTimeString())->toBe('2026-08-11 23:50:00')
+        ->and($dongSoCai->occurred_at->toDateString())->toBe('2026-08-11');
+
+    // Và giờ GHI vào máy chủ vẫn là giờ thật của lúc ghi — hai cột khác nhau,
+    // không cột nào nói dối.
+    expect($dongSoCai->created_at->toDateTimeString())->toBe('2026-08-12 00:10:00');
+
+    $this->travelBack();
+});
+
+it('báo cáo lọc theo ngày xếp dòng đó vào ngày cũ, không phải ngày đồng bộ', function () {
+    $bia = Ingredient::factory()->create(['code' => 'T-DEM2']);
+    nhapTonDau($bia, 100, 2_500_000, $this->user);
+
+    $bienThe = taoBienTheCoDinhLuong([[$bia, 1]]);
+    $dongMon = goiMonChoBienThe($this->luot, $bienThe, 2, $this->user);
+    $dongMon->update(['status' => OrderItemStatus::Served, 'served_at' => CarbonImmutable::parse('2026-08-11 23:50:00')]);
+
+    $this->travelTo(CarbonImmutable::parse('2026-08-12 00:10:00'));
+    app(DeductStockForServedItem::class)->handle($dongMon->fresh(), $this->user->id, $this->ca->id);
+    $this->travelBack();
+
+    $soDongNgay11 = StockMovement::query()
+        ->where('ref_type', StockMovementRefType::OrderItem)
+        ->whereDate('occurred_at', '2026-08-11')
+        ->count();
+
+    $soDongNgay12 = StockMovement::query()
+        ->where('ref_type', StockMovementRefType::OrderItem)
+        ->whereDate('occurred_at', '2026-08-12')
+        ->count();
+
+    expect($soDongNgay11)->toBe(1)
+        ->and($soDongNgay12)->toBe(0);
+});
+
+it('luồng chạy thẳng không đổi gì — giờ ghi sổ vẫn khớp giờ bếp bấm xong', function () {
+    $bia = Ingredient::factory()->create(['code' => 'T-THANG']);
+    nhapTonDau($bia, 100, 2_500_000, $this->user);
+
+    $bienThe = taoBienTheCoDinhLuong([[$bia, 1]]);
+    $dongMon = goiMonChoBienThe($this->luot, $bienThe, 1, $this->user);
+
+    app(UpdateOrderItemStatus::class)->handle(new UpdateOrderItemStatusData($dongMon->id, $this->user->id));
+
+    $dongSoCai = StockMovement::query()
+        ->where('ref_type', StockMovementRefType::OrderItem)
+        ->where('ref_id', $dongMon->id)
+        ->sole();
+
+    expect($dongSoCai->occurred_at->toDateTimeString())
+        ->toBe($dongMon->fresh()->served_at->toDateTimeString());
+});
