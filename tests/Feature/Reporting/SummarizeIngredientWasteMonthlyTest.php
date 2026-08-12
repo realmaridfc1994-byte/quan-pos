@@ -38,7 +38,15 @@ function nhapTonDauHaoHut(Ingredient $ingredient, int $qty, int $cost, User $use
 
 function ghiHaoHutVaoNgay(Ingredient $ingredient, int $qty, User $user, Carbon $ngay): void
 {
-    $movement = app(WriteOffStock::class)->handle(new WriteOffStockData(
+    // WriteOffStock ghi occurred_at = now(), nên dựng ngày quá khứ bằng cách
+    // VẶN ĐỒNG HỒ rồi ghi bình thường — không sửa dòng sổ cái sau khi ghi.
+    // (Trước đây hàm này sửa thẳng occurred_at rồi saveQuietly(); từ 12/08 sổ
+    // cái khoá cứng không cho sửa, xem StockMovement::performUpdate(). Vặn
+    // đồng hồ cũng giống luồng thật hơn: hao hụt tháng trước được ghi ở tháng
+    // trước, không phải ghi hôm nay rồi sửa ngày lại.)
+    test()->travelTo($ngay);
+
+    app(WriteOffStock::class)->handle(new WriteOffStockData(
         uuid: (string) Str::uuid(),
         ingredientId: $ingredient->id,
         category: WasteReasonCategory::Broken,
@@ -48,11 +56,7 @@ function ghiHaoHutVaoNgay(Ingredient $ingredient, int $qty, User $user, Carbon $
         shiftId: null,
     ));
 
-    // WriteOffStock luôn ghi occurred_at = now() — dựng lại đúng ngày cần test
-    // bằng cách cập nhật trực tiếp cột occurred_at (không đi qua Action, vì
-    // đây là bước dàn dựng dữ liệu quá khứ cho test, không phải nghiệp vụ).
-    $movement->occurred_at = $ngay;
-    $movement->saveQuietly();
+    test()->travelBack();
 }
 
 it('tổng hợp đúng tổng số lượng và giá trị hao hụt trong tháng', function () {
