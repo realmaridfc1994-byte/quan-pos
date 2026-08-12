@@ -19,10 +19,20 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * Sổ cái kho — mỗi lần kho thay đổi một dòng, không bao giờ sửa hay xoá.
  * Chỉ App\Domain\Inventory\Actions\RecordStockMovement được ghi vào bảng này.
  *
- * delete()/forceDelete() bị chặn cứng ở tầng Model (Bước 6) — không chỉ dựa
- * vào việc Filament không có nút Xoá, giống tinh thần khoá ghi của
- * StockBalance::choPhepGhi(), nhưng ở đây không có "cửa được phép" nào cả:
- * sổ cái ghi sai thì ghi thêm dòng bù trừ, không bao giờ xoá dòng cũ.
+ * XOÁ và SỬA đều bị chặn cứng ở tầng Model — không chỉ dựa vào việc Filament
+ * không có nút Xoá, giống tinh thần khoá ghi của StockBalance::choPhepGhi(),
+ * nhưng ở đây không có "cửa được phép" nào cả: sổ cái ghi sai thì ghi thêm
+ * dòng bù trừ, không bao giờ đụng vào dòng cũ.
+ *
+ * Chặn đủ CẢ HAI đường, vì chúng không đi chung một lối:
+ *   - Một dòng: delete(), forceDelete(), performUpdate() (chụp mọi lối sửa
+ *     một instance — update(), save(), touch()).
+ *   - Hàng loạt qua query builder: delete(), forceDelete(), update(),
+ *     increment(), decrement(), upsert().
+ * Tạo dòng mới vẫn chạy bình thường — đó là việc của RecordStockMovement.
+ *
+ * (Chặn xoá có từ Bước 6; chặn sửa thêm ở Bước 10 sau review mục 8.2-H —
+ * K1 nói "không bao giờ sửa" nhưng chỉ có nửa xoá được khoá.)
  */
 final class StockMovement extends Model
 {
@@ -38,6 +48,7 @@ final class StockMovement extends Model
     }
 
     protected $fillable = [
+        'uuid',
         'ingredient_id',
         'type',
         'qty_delta',
@@ -93,20 +104,38 @@ final class StockMovement extends Model
         return $this->belongsTo(Shift::class);
     }
 
+    private const LOI_XOA = 'Sổ cái kho không bao giờ được xoá — ghi sai thì ghi thêm dòng bù trừ.';
+
+    private const LOI_SUA = 'Sổ cái kho không bao giờ được sửa — ghi sai thì ghi thêm dòng bù trừ.';
+
     public function delete(): ?bool
     {
-        throw new StockMovementImmutableException('Sổ cái kho không bao giờ được xoá — ghi sai thì ghi thêm dòng bù trừ.');
+        throw new StockMovementImmutableException(self::LOI_XOA);
     }
 
     public function forceDelete(): bool
     {
-        throw new StockMovementImmutableException('Sổ cái kho không bao giờ được xoá — ghi sai thì ghi thêm dòng bù trừ.');
+        throw new StockMovementImmutableException(self::LOI_XOA);
     }
 
     /**
-     * Chặn cả đường xoá HÀNG LOẠT qua query builder (VD:
-     * StockMovement::query()->where(...)->delete()) — đường này không đi qua
-     * delete()/forceDelete() của từng instance ở trên.
+     * Chặn SỬA một dòng đã ghi (K1). Chặn ở performUpdate() chứ không ở
+     * update(): mọi đường sửa một instance — update(), save() sau khi đổi
+     * thuộc tính, touch() — đều chụm về đây, còn chặn ở update() thì
+     * $movement->qty_delta = 999; $movement->save() vẫn lọt.
+     *
+     * TẠO MỚI vẫn chạy bình thường: dòng mới đi qua performInsert(), không
+     * qua hàm này.
+     */
+    protected function performUpdate(Builder $query): bool
+    {
+        throw new StockMovementImmutableException(self::LOI_SUA);
+    }
+
+    /**
+     * Chặn cả đường xoá/sửa HÀNG LOẠT qua query builder (VD:
+     * StockMovement::query()->where(...)->update([...])) — đường này không đi
+     * qua performUpdate()/delete() của từng instance ở trên.
      */
     public function newEloquentBuilder($query): Builder
     {
@@ -114,13 +143,53 @@ final class StockMovement extends Model
         {
             public function delete(): mixed
             {
-                throw new StockMovementImmutableException('Sổ cái kho không bao giờ được xoá — ghi sai thì ghi thêm dòng bù trừ.');
+                throw new StockMovementImmutableException(StockMovement::loiXoa());
             }
 
             public function forceDelete(): mixed
             {
-                throw new StockMovementImmutableException('Sổ cái kho không bao giờ được xoá — ghi sai thì ghi thêm dòng bù trừ.');
+                throw new StockMovementImmutableException(StockMovement::loiXoa());
+            }
+
+            /** @param  array<string, mixed>  $values */
+            public function update(array $values): int
+            {
+                throw new StockMovementImmutableException(StockMovement::loiSua());
+            }
+
+            public function increment($column, $amount = 1, array $extra = []): int
+            {
+                throw new StockMovementImmutableException(StockMovement::loiSua());
+            }
+
+            public function decrement($column, $amount = 1, array $extra = []): int
+            {
+                throw new StockMovementImmutableException(StockMovement::loiSua());
+            }
+
+            /**
+             * upsert() là đường sửa trá hình: "chèn, nếu trùng khoá thì cập
+             * nhật". Trùng uuid là chuyện có thật (ghi lại vì mạng lag), nên
+             * đường này phải đóng luôn.
+             *
+             * @param  array<int|string, mixed>  $values
+             * @param  array<int, string>|string  $uniqueBy
+             * @param  array<int, string>|null  $update
+             */
+            public function upsert(array $values, $uniqueBy, $update = null): int
+            {
+                throw new StockMovementImmutableException(StockMovement::loiSua());
             }
         };
+    }
+
+    public static function loiXoa(): string
+    {
+        return self::LOI_XOA;
+    }
+
+    public static function loiSua(): string
+    {
+        return self::LOI_SUA;
     }
 }

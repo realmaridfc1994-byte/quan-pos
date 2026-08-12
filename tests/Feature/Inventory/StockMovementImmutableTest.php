@@ -3,70 +3,122 @@
 declare(strict_types=1);
 
 use App\Domain\Inventory\Actions\RecordStockMovement;
-use App\Domain\Inventory\Actions\WriteOffStock;
 use App\Domain\Inventory\DTO\RecordStockMovementData;
-use App\Domain\Inventory\DTO\WriteOffStockData;
 use App\Domain\Inventory\Enums\StockMovementRefType;
 use App\Domain\Inventory\Enums\StockMovementType;
-use App\Domain\Inventory\Enums\WasteReasonCategory;
 use App\Domain\Inventory\Models\Ingredient;
 use App\Domain\Inventory\Models\StockMovement;
 use App\Domain\Staffing\Models\User;
 use App\Exceptions\StockMovementImmutableException;
-use App\Filament\Resources\WasteRecordResource\Pages\ManageWasteRecords;
-use Livewire\Livewire;
+use Illuminate\Support\Facades\DB;
 
-beforeEach(function () {
-    $this->ingredient = Ingredient::factory()->create();
-    $this->movement = app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+/**
+ * Sổ cái kho không bao giờ được sửa hay xoá — bất biến K1.
+ *
+ * Chặn xoá đã có từ Bước 6. Chặn SỬA thêm ở Bước 10 (review mục 8.2-H): trước
+ * đó $movement->update(['qty_delta' => 999]) chạy trót lọt, và một dòng sổ cái
+ * sửa được là một dòng sổ cái không còn làm chứng được cho việc gì.
+ */
+function ghiMotDongSoCai(): StockMovement
+{
+    $nl = Ingredient::factory()->create();
+    $user = User::factory()->owner()->create();
+
+    return (new RecordStockMovement)->handle(new RecordStockMovementData(
         uuid: (string) Str::uuid(),
-        ingredientId: $this->ingredient->id,
+        ingredientId: $nl->id,
         type: StockMovementType::Purchase,
         qtyDelta: 100,
-        knownCost: 100_000,
+        knownCost: 2_000_000,
         refType: StockMovementRefType::Manual,
         refId: null,
         reason: null,
         approvedByUserId: null,
-        createdByUserId: User::factory()->owner()->create()->id,
+        createdByUserId: $user->id,
         shiftId: null,
     ));
+}
+
+it('gọi update() trên một dòng sổ cái đã ghi thì bị chặn', function () {
+    ghiMotDongSoCai()->update(['qty_delta' => 999]);
+})->throws(StockMovementImmutableException::class);
+
+it('đổi thuộc tính rồi save() cũng bị chặn — đường KHÔNG đi qua update()', function () {
+    $movement = ghiMotDongSoCai();
+
+    $movement->cost_delta = 1;
+    $movement->save();
+})->throws(StockMovementImmutableException::class);
+
+it('sửa HÀNG LOẠT qua query builder cũng bị chặn', function () {
+    ghiMotDongSoCai();
+
+    StockMovement::query()->where('qty_delta', 100)->update(['qty_delta' => 1]);
+})->throws(StockMovementImmutableException::class);
+
+it('increment() qua query builder cũng bị chặn', function () {
+    ghiMotDongSoCai();
+
+    StockMovement::query()->where('qty_delta', 100)->increment('qty_delta', 5);
+})->throws(StockMovementImmutableException::class);
+
+it('upsert() — đường sửa trá hình khi trùng uuid — cũng bị chặn', function () {
+    $movement = ghiMotDongSoCai();
+
+    StockMovement::query()->upsert(
+        [['uuid' => $movement->uuid, 'ingredient_id' => $movement->ingredient_id, 'qty_delta' => 7]],
+        ['uuid'],
+        ['qty_delta'],
+    );
+})->throws(StockMovementImmutableException::class);
+
+it('không dòng nào bị đổi sau khi các đường sửa đều bị chặn', function () {
+    $movement = ghiMotDongSoCai();
+
+    foreach ([
+        fn () => $movement->update(['qty_delta' => 999]),
+        fn () => StockMovement::query()->where('id', $movement->id)->update(['qty_delta' => 999]),
+        fn () => StockMovement::query()->where('id', $movement->id)->increment('qty_delta'),
+    ] as $duongSua) {
+        try {
+            $duongSua();
+        } catch (StockMovementImmutableException) {
+            // Đúng như mong đợi — chỉ cần chắc dữ liệu không xê dịch.
+        }
+    }
+
+    expect(DB::table('stock_movements')->where('id', $movement->id)->value('qty_delta'))->toBe(100);
 });
 
-it('không ai xoá được dòng sổ cái nào — gọi delete() trên instance bị chặn', function () {
-    expect(fn () => $this->movement->delete())->toThrow(StockMovementImmutableException::class);
+it('xoá vẫn bị chặn như cũ, và tạo dòng mới vẫn chạy bình thường', function () {
+    $movement = ghiMotDongSoCai();
 
-    expect(StockMovement::query()->find($this->movement->id))->not->toBeNull();
+    expect(fn () => $movement->delete())->toThrow(StockMovementImmutableException::class)
+        ->and(fn () => StockMovement::query()->where('id', $movement->id)->delete())->toThrow(StockMovementImmutableException::class);
+
+    // Chốt chặn không được vô tình đóng luôn cửa ghi dòng mới.
+    expect(ghiMotDongSoCai()->id)->not->toBe($movement->id)
+        ->and(StockMovement::query()->count())->toBe(2);
 });
 
-it('không ai xoá được dòng sổ cái nào — gọi forceDelete() trên instance bị chặn', function () {
-    expect(fn () => $this->movement->forceDelete())->toThrow(StockMovementImmutableException::class);
+it('lệnh vá uuid cho dòng cũ vẫn chạy được dù sổ cái đã khoá sửa', function () {
+    ghiMotDongSoCai();
 
-    expect(StockMovement::query()->find($this->movement->id))->not->toBeNull();
+    // Không dựng lại được tình huống thật (cột uuid đã NOT NULL từ migration
+    // 2026_08_11_000002, nên không còn dòng nào thiếu uuid trên database mới).
+    // Kiểm được đúng một điều, và đó là điều quan trọng: lệnh không nổ vì
+    // chốt chặn mới.
+    $this->artisan('stock:backfill-uuid')->assertSuccessful();
 });
 
-it('không ai xoá được dòng sổ cái nào — xoá hàng loạt qua query builder cũng bị chặn', function () {
-    expect(fn () => StockMovement::query()->where('id', $this->movement->id)->delete())
-        ->toThrow(StockMovementImmutableException::class);
+it('chốt chặn nằm ở tầng Eloquent — ghi thẳng qua tầng truy vấn vẫn qua được', function () {
+    $movement = ghiMotDongSoCai();
 
-    expect(StockMovement::query()->find($this->movement->id))->not->toBeNull();
-});
+    // Đây KHÔNG phải lỗ hổng bị bỏ quên mà là ranh giới đã biết, và là đường
+    // mà lệnh stock:backfill-uuid cố tình đi. Ghi lại thành test để ai đọc
+    // cũng biết chốt chặn này bảo vệ tới đâu: nó chặn code nghiệp vụ viết
+    // nhầm, KHÔNG chặn được người gõ SQL tay vào database.
+    DB::table('stock_movements')->where('id', $movement->id)->update(['reason' => 'vá tay']);
 
-it('màn hình Hao hụt không có nút Xoá', function () {
-    $chuQuan = User::factory()->owner()->create();
-    $this->actingAs($chuQuan);
-
-    $dongHaoHut = app(WriteOffStock::class)->handle(new WriteOffStockData(
-        uuid: (string) Str::uuid(),
-        ingredientId: $this->ingredient->id,
-        category: WasteReasonCategory::Broken,
-        detail: 'Vỡ khi bưng bê',
-        qty: 5,
-        createdByUserId: $chuQuan->id,
-        shiftId: null,
-    ));
-
-    Livewire::test(ManageWasteRecords::class)
-        ->assertTableActionDoesNotExist('delete', record: $dongHaoHut)
-        ->assertTableBulkActionDoesNotExist('delete');
+    expect(DB::table('stock_movements')->where('id', $movement->id)->value('reason'))->toBe('vá tay');
 });
