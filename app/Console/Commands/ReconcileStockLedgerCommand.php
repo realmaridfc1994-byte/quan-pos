@@ -38,10 +38,16 @@ final class ReconcileStockLedgerCommand extends Command
         $this->inMucSoLuong($ketQua);
         $this->inMucGiaTri($ketQua);
         $this->inMucServedAt($ketQua);
+        $this->inMucThieuGiaVon($ketQua);
+        $this->inMucQuenBamXong($ketQua);
 
         $this->newLine();
         if ($ketQua->sach()) {
             $this->line('<fg=green;options=bold>✅ SỔ CÁI KHO SẠCH — KHÔNG LỆCH.</>');
+
+            if ($ketQua->coCanhBao()) {
+                $this->line('<fg=yellow>⚠️  Nhưng có việc cần dọn ở mục 4 và/hoặc 5 — xem ở trên.</>');
+            }
 
             return self::SUCCESS;
         }
@@ -91,7 +97,7 @@ final class ReconcileStockLedgerCommand extends Command
         $this->newLine();
         $this->line('<options=bold>3. Dòng món đã phục vụ ↔ dòng sổ cái</>');
 
-        if ($ketQua->thieuSoCai === [] && $ketQua->soCaiMoCoi === []) {
+        if ($ketQua->thieuSoCai === [] && $ketQua->soCaiMoCoi === [] && $ketQua->moCoiDaGhiChu === []) {
             $this->line('   ✅ Mọi dòng món đã phục vụ đều có sổ cái tương ứng, không có dòng sổ cái mồ côi.');
 
             return;
@@ -109,6 +115,67 @@ final class ReconcileStockLedgerCommand extends Command
             foreach ($ketQua->soCaiMoCoi as $dong) {
                 $this->line("      - Sổ cái #{$dong['stock_movement_id']} → order_item #{$dong['ref_id']}");
             }
+            $this->line('   <fg=gray>Xem xong mà thấy không phải lỗi thì chạy: php artisan stock:ghi-chu-mo-coi &lt;số hiệu&gt; --ghi-chu="..." --ly-do="..."</>');
         }
+
+        // Vẫn LIỆT KÊ đầy đủ, nhưng không đếm vào số lỗi và không làm lệnh
+        // trả về mã lỗi — xem AcknowledgeOrphanMovement.
+        if ($ketQua->moCoiDaGhiChu !== []) {
+            $this->line('   ✔️  '.count($ketQua->moCoiDaGhiChu).' dòng sổ cái mồ côi ĐÃ XEM (không tính vào số lỗi):');
+            foreach ($ketQua->moCoiDaGhiChu as $dong) {
+                $this->line("      - Sổ cái #{$dong['stock_movement_id']} → order_item #{$dong['ref_id']}");
+                $this->line("        {$dong['acknowledged_by']} xác nhận lúc {$dong['acknowledged_at']}: {$dong['reason']}");
+            }
+        }
+    }
+
+    /**
+     * Mục 4 — CẢNH BÁO, KHÔNG PHẢI LỖI. Sổ sách vẫn khớp; chỉ là những dòng
+     * này bán lúc kho đang âm nên chưa biết giá vốn thật, làm lãi gộp trông
+     * cao hơn thực tế.
+     */
+    private function inMucThieuGiaVon(StockReconciliationResult $ketQua): void
+    {
+        $this->newLine();
+        $this->line('<options=bold>4. Dòng sổ cái chưa xác định được giá vốn (bán lúc tồn âm)</>');
+
+        if ($ketQua->thieuGiaVon === []) {
+            $this->line('   ✅ Không có dòng nào — mọi lần xuất kho trong kỳ đều biết giá vốn.');
+
+            return;
+        }
+
+        $tongDong = array_sum(array_column($ketQua->thieuGiaVon, 'so_dong'));
+        $this->line("   <fg=yellow>⚠️  {$tongDong} dòng ở ".count($ketQua->thieuGiaVon).' nguyên liệu. Đây KHÔNG phải lỗi sổ sách — là tồn âm cần dọn:</>');
+
+        foreach ($ketQua->thieuGiaVon as $dong) {
+            $this->line("      - {$dong['ingredient_name']}: {$dong['so_dong']} dòng");
+        }
+
+        $this->line('   <fg=gray>Lãi gộp của những món dùng các nguyên liệu này đang CAO HƠN thực tế.</>');
+    }
+
+    /**
+     * Mục 5 — CẢNH BÁO, KHÔNG PHẢI LỖI. Bếp quên bấm "xong" nên kho chưa trừ,
+     * trong khi tiền đã tính đủ cho khách.
+     */
+    private function inMucQuenBamXong(StockReconciliationResult $ketQua): void
+    {
+        $this->newLine();
+        $this->line('<options=bold>5. Món đã tính tiền mà bếp chưa bấm xong</>');
+
+        if ($ketQua->quenBamXong === []) {
+            $this->line('   ✅ Không có dòng nào — mọi món của lượt khách đã đóng đều được bấm xong.');
+
+            return;
+        }
+
+        $this->line('   <fg=yellow>⚠️  '.count($ketQua->quenBamXong).' dòng món thuộc lượt khách ĐÃ ĐÓNG mà chưa bấm xong:</>');
+
+        foreach ($ketQua->quenBamXong as $dong) {
+            $this->line("      - Dòng #{$dong['order_item_id']} ({$dong['product_name']} — {$dong['variant_name']}), lượt khách {$dong['table_session_code']}, đóng lúc {$dong['closed_at']}");
+        }
+
+        $this->line('   <fg=gray>Những dòng này chưa trừ kho nhưng đã tính tiền — lãi gộp món đó đang CAO HƠN thực tế.</>');
     }
 }

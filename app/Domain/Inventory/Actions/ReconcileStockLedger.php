@@ -9,6 +9,9 @@ use App\Domain\Inventory\Enums\StockMovementRefType;
 use App\Domain\Inventory\Models\Ingredient;
 use App\Domain\Inventory\Models\StockBalance;
 use App\Domain\Inventory\Models\StockMovement;
+use App\Domain\Inventory\Models\StockReconciliationNote;
+use App\Domain\Ordering\Enums\OrderItemStatus;
+use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Ordering\Models\OrderItem;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -27,6 +30,14 @@ use Illuminate\Support\Collection;
  *     (split_from_item_id khác rỗng) CŨNG có served_at kế thừa nhưng KHÔNG
  *     có dòng sổ cái riêng (K7) — phải loại trừ, không thì báo lệch giả.
  *
+ * Thêm ở Bước 10 — HAI MỤC CẢNH BÁO, không phải mục kiểm lệch:
+ *  d. Dòng sổ cái has_cost = false: bán lúc kho đang âm nên không xác định
+ *     được giá vốn. Sổ sách KHÔNG sai, nhưng lãi gộp của những món đó đang
+ *     cao hơn thực tế cho tới khi nhập hàng bù.
+ *  e. Dòng món thuộc lượt khách ĐÃ ĐÓNG mà chưa có served_at: bếp quên bấm
+ *     xong, nên chưa trừ kho trong khi tiền đã tính đủ.
+ * Cả hai KHÔNG làm sach() thành false — xem lý do trong StockReconciliationResult.
+ *
  * Luôn tự ghi kết quả vào activity_log (log_name = 'doi-soat-kho') — CHỖ
  * DUY NHẤT màn hình chủ quán đọc để hiện cảnh báo, không tạo bảng DB mới
  * (spatie/laravel-activitylog đã có sẵn, dùng lại đúng cách VerifyApproverPin
@@ -38,9 +49,18 @@ final class ReconcileStockLedger
     {
         $lechQty = $this->doiSoatSoLuong();
         $lechCost = $this->doiSoatGiaTri();
-        [$thieuSoCai, $soCaiMoCoi] = $this->doiSoatServedAt($tuNgay, $denNgay);
+        [$thieuSoCai, $moCoiTatCa] = $this->doiSoatServedAt($tuNgay, $denNgay);
+        [$soCaiMoCoi, $moCoiDaGhiChu] = $this->tachTheoGhiChu($moCoiTatCa);
 
-        $ketQua = new StockReconciliationResult($lechQty, $lechCost, $thieuSoCai, $soCaiMoCoi);
+        $ketQua = new StockReconciliationResult(
+            $lechQty,
+            $lechCost,
+            $thieuSoCai,
+            $soCaiMoCoi,
+            $this->domDongThieuGiaVon($tuNgay, $denNgay),
+            $this->domDongMonQuenBamXong($tuNgay, $denNgay),
+            $moCoiDaGhiChu,
+        );
 
         activity('doi-soat-kho')
             ->withProperties([
@@ -51,6 +71,116 @@ final class ReconcileStockLedger
             ->log($ketQua->sach() ? 'Đối soát kho sạch — không lệch.' : 'Đối soát kho phát hiện lệch.');
 
         return $ketQua;
+    }
+
+    /**
+     * Mục 4 — CẢNH BÁO: dòng sổ cái không xác định được giá vốn (bán lúc tồn
+     * âm). Gom theo nguyên liệu để chủ quán biết nhập bù cái nào trước.
+     * Lọc theo occurred_at trong khoảng ngày, giống mục 3.
+     *
+     * @return list<array{ingredient_id: int, ingredient_name: string, so_dong: int}>
+     */
+    private function domDongThieuGiaVon(?Carbon $tuNgay, ?Carbon $denNgay): array
+    {
+        $theoNguyenLieu = StockMovement::query()
+            ->where('has_cost', false)
+            ->when($tuNgay !== null, fn ($q) => $q->whereDate('occurred_at', '>=', $tuNgay))
+            ->when($denNgay !== null, fn ($q) => $q->whereDate('occurred_at', '<=', $denNgay))
+            ->selectRaw('ingredient_id, COUNT(*) as so_dong')
+            ->groupBy('ingredient_id')
+            ->pluck('so_dong', 'ingredient_id');
+
+        if ($theoNguyenLieu->isEmpty()) {
+            return [];
+        }
+
+        $ten = Ingredient::query()->whereIn('id', $theoNguyenLieu->keys())->pluck('name', 'id');
+
+        return $theoNguyenLieu
+            ->map(fn ($soDong, $id): array => [
+                'ingredient_id' => (int) $id,
+                'ingredient_name' => $ten[$id] ?? "#{$id}",
+                'so_dong' => (int) $soDong,
+            ])
+            ->sortByDesc('so_dong')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Mục 5 — CẢNH BÁO: dòng món thuộc lượt khách ĐÃ ĐÓNG mà chưa có
+     * served_at. Tiền đã tính đủ nhưng kho chưa trừ, nên lãi gộp món đó đang
+     * cao hơn thực tế. Lọc theo closed_at của lượt khách trong khoảng ngày.
+     *
+     * @return list<array{order_item_id: int, product_name: string, variant_name: string, table_session_code: string, closed_at: string}>
+     */
+    private function domDongMonQuenBamXong(?Carbon $tuNgay, ?Carbon $denNgay): array
+    {
+        return OrderItem::query()
+            ->whereNull('served_at')
+            ->where('status', '!=', OrderItemStatus::Cancelled)
+            ->whereHas('order.tableSession', fn ($q) => $q
+                ->where('status', TableSessionStatus::Closed)
+                ->when($tuNgay !== null, fn ($qq) => $qq->whereDate('closed_at', '>=', $tuNgay))
+                ->when($denNgay !== null, fn ($qq) => $qq->whereDate('closed_at', '<=', $denNgay)))
+            ->with('order.tableSession:id,code,closed_at')
+            ->get()
+            ->map(fn (OrderItem $item): array => [
+                'order_item_id' => $item->id,
+                'product_name' => $item->product_name,
+                'variant_name' => $item->variant_name,
+                'table_session_code' => $item->order->tableSession->code,
+                'closed_at' => $item->order->tableSession->closed_at?->toDateTimeString() ?? '',
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Tách danh sách dòng mồ côi thành hai: chưa ai xem, và ĐÃ có người xem
+     * và xác nhận không phải lỗi (xem AcknowledgeOrphanMovement).
+     *
+     * Sổ cái không xoá được, nên không có cách nào làm một dòng mồ côi biến
+     * mất. Không có bước này thì nó báo đỏ mãi mãi và người ta sẽ quen với
+     * màu đỏ tới mức bỏ qua cả lệch thật.
+     *
+     * @param  list<array{stock_movement_id: int, ref_id: ?int}>  $moCoi
+     * @return array{0: list<array{stock_movement_id: int, ref_id: ?int}>, 1: list<array{stock_movement_id: int, ref_id: ?int, note: string, reason: string, acknowledged_by: string, acknowledged_at: string}>}
+     */
+    private function tachTheoGhiChu(array $moCoi): array
+    {
+        if ($moCoi === []) {
+            return [[], []];
+        }
+
+        $ghiChu = StockReconciliationNote::query()
+            ->whereIn('stock_movement_id', array_column($moCoi, 'stock_movement_id'))
+            ->with('acknowledgedBy:id,name')
+            ->get()
+            ->keyBy('stock_movement_id');
+
+        $chuaXem = [];
+        $daXem = [];
+
+        foreach ($moCoi as $dong) {
+            $note = $ghiChu->get($dong['stock_movement_id']);
+
+            if ($note === null) {
+                $chuaXem[] = $dong;
+
+                continue;
+            }
+
+            $daXem[] = [
+                ...$dong,
+                'note' => $note->note,
+                'reason' => $note->reason,
+                'acknowledged_by' => $note->acknowledgedBy->name,
+                'acknowledged_at' => $note->acknowledged_at->toDateTimeString(),
+            ];
+        }
+
+        return [$chuaXem, $daXem];
     }
 
     /** @return list<array{ingredient_id: int, ingredient_name: string, so_cai: int, ton_kho: int, lech: int}> */

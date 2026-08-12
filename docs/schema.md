@@ -10,7 +10,7 @@
 >
 > **Một khác biệt về cách báo lỗi, xem bất biến M5:** khi ai đó cố nhập tay đè lên cột máy tự tính, MySQL 8 từ chối cả câu lệnh, còn MariaDB nhận câu lệnh nhưng **vứt bỏ giá trị gian lận** rồi tự tính lại đúng, chỉ kèm cảnh báo `#1906`. Dữ liệu được bảo vệ như nhau, nhưng lập trình viên không nghe thấy tiếng hét — nên phải bù bằng hai luật ở `CLAUDE.md` mục 4 và mục 7.
 >
-> **Khi đưa vào chạy thật ở quán:** XAMPP tự tuyên bố chỉ dành cho phát triển, và MariaDB 10.4 đã hết hạn hỗ trợ. Máy chạy thật ở quán nên dùng MySQL 8 hoặc MariaDB bản LTS còn hỗ trợ. Đây là việc của Phase 4, ghi lại để không quên.
+> **Môi trường đang chạy, cả máy dev lẫn CI:** MariaDB 10.4.32 đi kèm XAMPP 8.2.12, cổng 3306, tài khoản `root` mật khẩu rỗng, `utf8mb4` / `utf8mb4_unicode_ci`. Driver trong `.env` là `mariadb` (Laravel 11+ có driver riêng), KHÔNG phải `mysql`. `tests/Feature/Support/DatabaseDriverTest.php` gác điều này. *(Việc thay engine trên máy đặt ở quán thuộc Phase 4 — đã ghi trong `docs/viec-ton.md`, không phải chuyện của máy dev.)*
 
 ---
 
@@ -1312,7 +1312,7 @@ Cách dựng lại môi trường để tự kiểm tra: xem `docs/huong-dan-moi
 
 ---
 
-## K.1. Mười hai bảng và vai trò
+## K.1. Mười ba bảng và vai trò
 
 | # | Bảng | Vai trò bằng ngôn ngữ quán |
 |---|---|---|
@@ -1328,6 +1328,7 @@ Cách dựng lại môi trường để tự kiểm tra: xem `docs/huong-dan-moi
 | 10 | `stock_take_items` | Từng dòng kiểm kê: hệ thống bảo bao nhiêu, đếm được bao nhiêu |
 | 11 | `product_profit_daily` | **Sổ lãi gộp theo món, theo NGÀY** (Phase 3 Bước 8) — cùng vòng đời với `product_sales_daily`, nhưng cộng thêm giá vốn và lãi gộp. Màn hình chủ quán CHỈ đọc từ đây |
 | 12 | `ingredient_waste_monthly` | **Sổ hao hụt theo nguyên liệu, theo THÁNG** (Phase 3 Bước 8) — tổng số lượng và giá trị hao hụt (`stock_movements.type = 'waste'`) mỗi tháng, để màn hình chủ quán so tháng này với tháng trước mà không phải đọc thẳng sổ cái |
+| 13 | `stock_reconciliation_notes` | **Ghi chú đối soát** (Phase 3 Bước 10) — tờ giấy dán bên cạnh một dòng sổ cái mồ côi: "đã xem, không phải lỗi, vì...". Không đụng vào sổ cái; chỉ làm lệnh `stock:doi-soat` thôi đếm dòng đó vào số lỗi |
 
 ### Ba điều cần hiểu trước khi đọc DDL
 
@@ -1514,6 +1515,13 @@ CREATE TABLE recipes (
 -- ═══════════════════════════════════════════════════════════════
 CREATE TABLE stock_movements (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+    -- K16 (thêm Bước 10): mã vân tay của dòng sổ cái. Hao hụt và điều chỉnh
+    -- tay do MÀN HÌNH sinh và gửi lên; bán món, nhập hàng, kiểm kê do server
+    -- sinh TẤT ĐỊNH từ chứng từ gốc (App\Support\StockMovementUuid).
+    -- Thêm NULL trước, siết NOT NULL sau khi chạy `stock:backfill-uuid`.
+    uuid                CHAR(36)        NULL COLLATE ascii_bin,
+
     ingredient_id       BIGINT UNSIGNED NOT NULL,
 
     type                ENUM('purchase','sale','waste','adjust','stocktake',
@@ -1550,6 +1558,11 @@ CREATE TABLE stock_movements (
     -- ref_id NULL (manual) không bị chặn vì MariaDB cho nhiều NULL trong
     -- khoá duy nhất.
     UNIQUE KEY uq_stock_movements_ref (ref_type, ref_id, ingredient_id),
+
+    -- K16: lớp chống ghi trùng THỨ HAI, và là lớp DUY NHẤT có tác dụng với hao
+    -- hụt/điều chỉnh tay (hai đường luôn có ref_id NULL nên khoá trên không
+    -- chặn được gì). Ghi hai lần cùng mã vân tay chỉ ra một dòng sổ cái.
+    UNIQUE KEY uq_stock_movements_uuid (uuid),
 
     KEY idx_stock_movements_ledger (ingredient_id, id),
     KEY idx_stock_movements_type_time (type, occurred_at),
@@ -1808,6 +1821,15 @@ CREATE TABLE product_profit_daily (
     revenue_amount      BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Doanh thu ĐÃ phân bổ giảm giá theo tỉ lệ',
     cost_amount         BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Giá vốn thật tại thời điểm bán, từ stock_movements',
 
+    -- Thêm Bước 10. cost_amount = 0 có thể là "món không tốn nguyên liệu",
+    -- cũng có thể là "không ai biết nó tốn bao nhiêu" — hai cột dưới phân biệt
+    -- hai trường hợp đó, để màn hình chủ quán treo được dấu cảnh báo. Chúng
+    -- KHÔNG sửa cost_amount và KHÔNG bịa giá vốn cho dòng nào.
+    qty_no_cost         INT UNSIGNED    NOT NULL DEFAULT 0
+                        COMMENT 'SL bán mà không xác định được giá vốn (bán lúc tồn âm, sổ cái has_cost=false)',
+    qty_not_served      INT UNSIGNED    NOT NULL DEFAULT 0
+                        COMMENT 'SL đã tính tiền nhưng bếp chưa bấm xong (lượt khách đã đóng mà thiếu served_at)',
+
     profit_amount       BIGINT
                         GENERATED ALWAYS AS (CAST(revenue_amount AS SIGNED) - CAST(cost_amount AS SIGNED)) STORED
                         COMMENT 'Máy tự tính = doanh thu - giá vốn. CỐ Ý có dấu vì bán lỗ vẫn ghi được',
@@ -1844,6 +1866,47 @@ CREATE TABLE ingredient_waste_monthly (
     UNIQUE KEY uq_ingredient_waste_monthly_month_ingredient (month, ingredient_id),
     CONSTRAINT fk_ingredient_waste_monthly_ingredient FOREIGN KEY (ingredient_id)
         REFERENCES ingredients (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### Bảng 13 — GHI CHÚ ĐỐI SOÁT (Phase 3 Bước 10)
+
+Sổ cái không xoá được (K1). Nên khi lệnh đối soát tìm ra một **dòng sổ cái mồ côi** — dòng đã trừ kho nhưng dòng món tương ứng không còn được tính là đã phục vụ — thì không có cách nào dọn nó, và nó báo đỏ mãi mãi. Người ta quen với màu đỏ rồi sẽ bỏ qua cả lệch thật, đúng thứ đối soát sinh ra để bắt.
+
+Bảng này là đường thoát: chủ quán xem xong và xác nhận "biết rồi", có ghi ai xác nhận và vì sao. Dòng đó **vẫn hiện** trong bản đối soát nhưng thôi tính vào số lỗi.
+
+```sql
+CREATE TABLE stock_reconciliation_notes (
+    id                      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+    stock_movement_id       BIGINT UNSIGNED NOT NULL
+                            COMMENT 'Dòng sổ cái mồ côi được xác nhận',
+    note                    VARCHAR(255) NOT NULL
+                            COMMENT 'Ghi chú của người xác nhận',
+    reason                  VARCHAR(255) NOT NULL
+                            COMMENT 'Vì sao dòng này không phải lỗi sổ sách',
+
+    acknowledged_by_user_id BIGINT UNSIGNED NOT NULL,
+    acknowledged_at         DATETIME NOT NULL,
+
+    created_at              TIMESTAMP NULL DEFAULT NULL,
+    updated_at              TIMESTAMP NULL DEFAULT NULL,
+
+    PRIMARY KEY (id),
+
+    -- Một dòng sổ cái chỉ ghi chú đúng một lần. Xác nhận lần hai không có
+    -- nghĩa gì — nó đã thôi báo đỏ từ lần đầu rồi.
+    UNIQUE KEY uq_srn_one_note_per_movement (stock_movement_id),
+
+    -- Xác nhận mà không nói rõ vì sao thì vô giá trị.
+    CONSTRAINT ck_srn_reason CHECK (
+        CHAR_LENGTH(TRIM(reason)) >= 5 AND CHAR_LENGTH(TRIM(note)) >= 5
+    ),
+
+    CONSTRAINT fk_srn_movement FOREIGN KEY (stock_movement_id)
+        REFERENCES stock_movements (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_srn_user FOREIGN KEY (acknowledged_by_user_id)
+        REFERENCES users (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
@@ -1886,10 +1949,14 @@ CREATE TABLE ingredient_waste_monthly (
 | **K13** | Chỉ có đúng một phiếu kiểm kê đang mở | **DB** `uq_stock_takes_only_one_open` |
 | **K14** | Mỗi nguyên liệu chỉ có đúng một đơn vị nhập mặc định | **DB** `uq_ingredient_units_default` |
 | **K15** | Hàng hỏng vỡ bắt buộc ghi lý do | **DB** `ck_stock_movements_waste_reason` |
+| **K16** | Ghi hai lần cùng một mã vân tay chỉ ra một dòng sổ cái | **DB** `uq_stock_movements_uuid` + code |
+| **K17** | Một dòng sổ cái mồ côi chỉ được xác nhận "đã xem" đúng một lần, và phải đủ ai/khi nào/vì sao | **DB** `uq_srn_one_note_per_movement`, `ck_srn_reason` + code |
 
 **K5 và K7 là hai bất biến quan trọng nhất.** Chúng chặn trừ kho hai lần — lỗi kho nguy hiểm nhất, vì nó không báo gì và chỉ lộ ra khi kiểm kê ba tháng sau.
 
 Cách chúng hoạt động: khoá duy nhất `(ref_type, ref_id, ingredient_id)`. Trừ kho cho dòng món số 148 lần thứ hai sẽ đâm vào khoá này và bị database từ chối, kể cả khi code có lỗi.
+
+**K16 bịt đúng chỗ K5/K7 với không tới** (sửa ngày 11/08, Phase 3 Bước 10). Hao hụt và điều chỉnh tay không có chứng từ gốc nên luôn ghi `ref_id` rỗng, mà MariaDB không coi hai dòng cùng rỗng là trùng nhau — nghĩa là hai đường đó **không được `uq_stock_movements_ref` bảo vệ chút nào**. Thu ngân bấm ghi "5 lon vỡ", mạng lag, bấm lại: kho trừ 10 lon, không lỗi nào nổ. Mã vân tay `uuid` bịt lỗ đó. Hai khoá cùng tồn tại, không khoá nào thay khoá nào.
 
 > **Lưu ý cho Bước 9.** Job đối soát kiểm "mọi dòng món có `served_at` đều có dòng sổ cái tương ứng". Nhưng **dòng tách ra khi hủy một phần cũng có `served_at`** (kế thừa từ dòng gốc) mà **không** có dòng sổ cái — theo đúng K7. Job phải loại trừ những dòng có `split_from_item_id` khác rỗng, nếu không nó sẽ báo lệch giả mỗi lần có hủy một phần.
 
