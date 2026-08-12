@@ -2116,3 +2116,51 @@ Chỗ nối duy nhất giữa kho và bán hàng là mũi tên `order_items → 
 - [ ] Cập nhật mục lục Phần 1 của `docs/schema.md` với mười bảng mới
 
 Ba việc này làm **trước** khi viết migration đầu tiên. Luật phải có mặt trước khi có code chạy theo nó.
+
+---
+
+# PHẦN L — KHÁCH HÀNG (Phase 4 Bước P4-4A.1)
+
+Một bảng mới, viết ngoài mục lục 20 bảng ở PHẦN 1 — cùng cách nhóm K (kho) đã làm.
+
+## L.1. Bảng và vai trò
+
+| # | Bảng | Vai trò bằng ngôn ngữ quán |
+|---|---|---|
+| 21 | `customers` | **Sổ khách quen.** Số điện thoại, tên, ghi chú. Không xoá — nghỉ chơi thì tắt `is_active`, giống `suppliers`. |
+
+**Không có `branch_id`.** Hệ thống một quán, không phải SaaS nhiều chi nhánh — xem quyết định
+12/08 ở `docs/viec-ton.md`.
+
+## L.2. Sổ cái điểm thưởng — HOÃN
+
+`point_transactions` (sổ cái) và `point_balances` (snapshot) đã thiết kế và viết xong (schema,
+Model, Action `RecordPointTransaction` — cửa duy nhất ghi, 38 test xanh gồm cả test đồng thời và
+chặn số dư âm), nhưng chủ dự án hoãn lại 12/08 để chốt chính sách trước. Chi tiết đầy đủ, DDL, và
+lý do nằm ở `docs/viec-ton.md` mục **"Tích điểm thành viên — HOÃN (12/08/2026)"**. Code tham khảo
+nằm nguyên trên branch `park/loyalty-4a1`, không hợp nhất vào `master`.
+
+**Khi làm lại:** đọc lại bốn câu chính sách chưa chốt và ba quyết định kiến trúc đã chốt trong
+`docs/viec-ton.md` trước, đừng chỉ merge code cũ vào — chính sách tích/tiêu điểm có thể đã đổi.
+
+## L.3. DDL
+
+```sql
+-- ═══════════════════════════════════════════════════════════════
+-- 21. KHÁCH HÀNG
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE customers (
+    id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    phone               VARCHAR(20)     NOT NULL,
+    name                VARCHAR(150)    NOT NULL,
+    note                VARCHAR(255)    NULL,
+    is_active           TINYINT(1)      NOT NULL DEFAULT 1,
+
+    created_at          TIMESTAMP       NULL,
+    updated_at          TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_customers_phone (phone),
+    KEY idx_customers_active (is_active, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```

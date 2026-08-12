@@ -104,3 +104,32 @@ Ví dụ:
 [Bước sau] Kiểm kê THỪA lúc tồn ≤ 0 cho ra giá vốn 0 nhưng has_cost = TRUE (StockCost::giaVonNhapTheoTrungBinh). Hệ quả: số hàng đó vào kho với trị giá 0đ, và khi bán ra sau này giá vốn tính bằng 0 mà KHÔNG có cờ cảnh báo nào — khác hẳn nhánh bán lúc kho âm (has_cost = FALSE, có đếm vào qty_no_cost và hiện cảnh báo trên màn hình chủ quán). Nghĩa là lãi gộp của mấy món đó cao hơn thực tế mà im lặng. Không nằm trong danh sách 🔴/🟡 của review Bước 10 nên KHÔNG tự sửa trong batch này; cần chủ dự án quyết: đánh has_cost = false cho nhánh này, hay ước giá vốn theo lô nhập gần nhất — 12/08
 [Bước sau] Bộ quét KhongChiaTrenTienTest được vá 12/08 để nhìn cả BIẾN đã gán từ cột tiền (và bí danh `... as doanh_thu` trong selectRaw), không chỉ tên cột — trước đó chia tiền trên biến tên tiếng Việt lọt qua sạch. Giới hạn còn lại: bộ quét đọc từng DÒNG, nên một phép chia bị ngắt xuống hai dòng vẫn lọt. Chấp nhận — mục đích là chặn thói quen, không phải chứng minh định lý — 12/08
 [Bước sau] K18 (kho đứng yên khi phiếu kiểm kê đang mở, thêm 12/08) chặn ở tầng code chứ không ở database — CHECK không diễn tả được điều kiện "bảng A có dòng trạng thái X thì cấm ghi bảng B", còn làm bằng trigger thì phải nhét vào mọi đường ghi kèm một cửa ngoại lệ cho CloseStockTake. Hệ quả vận hành: trong lúc kiểm kê, nhập hàng và mở bàn mới đều bị từ chối với thông báo tiếng Việt. Nếu quán hay nhập hàng giữa buổi kiểm kê thì cần bàn lại cách khác (VD chụp lại system_qty tại thời điểm ĐẾM thay vì thời điểm MỞ phiếu) — 12/08
+[Chờ chủ dự án quyết — P4-4A.1] Bảng `customers` không có cột `branch_id`. Yêu cầu ban đầu có cột này nhưng hệ thống là một quán, không phải SaaS nhiều chi nhánh (CLAUDE.md mục 1, không có bảng `branches` nào trong docs/schema.md) — chủ dự án đã chọn bỏ cột này lúc duyệt phạm vi (12/08). Cần quay lại nếu sau này thật sự mở multi-branch — 12/08
+
+---
+
+## Tích điểm thành viên — HOÃN (12/08/2026)
+
+Quyết định có ý thức, không phải quên.
+Bảng customers đã tạo và commit; phần sổ cái điểm không commit.
+Code tham khảo: branch park/loyalty-4a1
+
+Bốn câu chính sách phải chốt trước khi làm lại:
+- Tỷ lệ tích: 1–2 điểm / 100.000đ (chưa chốt con số cuối)
+- 1 điểm = 1.000đ khi tiêu
+- Chỉ tích trên phần tiền thật, không tích trên phần trả bằng điểm
+- Trần tiêu: ≤ 20% bill
+- Hạn dùng: 60 ngày kể từ lần tích đầu
+
+Quyết định kiến trúc đã chốt, giữ nguyên khi làm lại:
+- Điểm là PHƯƠNG THỨC THANH TOÁN (tender), không phải giảm giá.
+  Lý do: giữ doanh thu đúng, giữ căn cứ tính thuế HĐĐT đúng,
+  không đụng engine khuyến mãi P2.
+- Đối soát ca phải loại điểm khỏi tiền mặt kỳ vọng, Z-report một dòng riêng.
+- Mọi truy vấn SUM theo loại bút toán phải dùng DANH SÁCH TRẮNG.
+
+Kèm theo khi làm lại: báo cáo công nợ điểm đang lưu hành.
+
+---
+
+[Bước sau] Phát hiện ngoài phạm vi khi dọn nhánh park/loyalty-4a1 (không đụng gì tới Catalog/Product/Category): chạy hết toàn bộ `./vendor/bin/pest` (có --parallel hay không đều vậy) để lại **2 dòng rác trong bảng `categories`** của database test (`quan_pos_test`), tên dạng `Nhóm test N`. Lần chạy KẾ TIẾP, `CategoryFactory` (bộ đếm tĩnh reset về 0 mỗi tiến trình `pest` mới) sinh trùng đúng cái tên đó → `tests/Unit/Catalog/ProductEffectiveStationTest.php` (chỉ gọi `->make()`) nổ `UniqueConstraintViolationException` — vì `ProductFactory` có khoá ngoại `category_id => Category::factory()`, và Laravel LUÔN `create()` thật cho factory lồng nhau dùng làm giá trị khoá ngoại mặc định, kể cả khi factory cha gọi `->make()`. Nghi ngờ nguồn rác: một test nào đó (có thể qua Filament/Livewire, xem khoảng trống đã ghi 05/08 "chưa có test tự động cho luồng Filament có Repeater lồng nhau") không nằm trong transaction rollback chuẩn. Xử lý tạm đã làm: xoá tay 2 dòng rác (`DELETE FROM categories WHERE name LIKE 'Nhóm test%'` trên `quan_pos_test` — database test, không phải production, không vi phạm luật cấm xoá dữ liệu). Cần tìm đúng test nào gây rò rỉ và bọc lại transaction, hoặc đổi `ProductFactory`/`CategoryFactory` sang mẫu bộ đếm không đụng DB thật khi `make()` — 12/08
