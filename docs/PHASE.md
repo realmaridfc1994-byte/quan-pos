@@ -8,10 +8,10 @@ PHASE = 3
 BUOC_DANG_MO = 9
 ```
 
-**Phase 3 — Kho và lợi nhuận. Bước 0 — Kiểm toán chuẩn bị kho.**
-Được phép: CHỈ BÁO CÁO. Không sửa code, không tạo file ngoài file báo cáo.
+**Phase 3 — Kho và lợi nhuận. Bước 10 — Opus review toàn phase.**
+Được phép: sửa những lỗi Opus đã chỉ ra trong báo cáo review, kèm test chứng minh. Nghiệm thu: hết mục 🔴.
 
-**Mọi việc thuộc Bước 1 trở đi: DỪNG và hỏi.**
+**Mọi việc KHÔNG nằm trong báo cáo review: DỪNG và hỏi.**
 
 ---
 
@@ -42,7 +42,7 @@ BUOC_DANG_MO = 9
 - [x] Phase 0 — nền móng, 5 lỗi 🔴 đóng sau 2 vòng review
 - [x] Phase 1 — MVP bán hàng, 2 lỗi 🔴 đóng
 - [x] Phase 2 — offline, đồng bộ, khuyến mãi, 2 lỗi 🔴 đóng
-- [x] Bước 0 — Kiểm toán chuẩn bị kho  ← ĐANG MỞ
+- [x] Bước 0 — Kiểm toán chuẩn bị kho
 - [x] Bước 1 — Schema kho
 - [x] Bước 2 — Nguyên liệu và đơn vị
 - [x] Bước 3 — Định lượng món
@@ -51,5 +51,5 @@ BUOC_DANG_MO = 9
 - [x] Bước 6 — Hao hụt và điều chỉnh
 - [x] Bước 7 — Kiểm kê
 - [x] Bước 8 — Báo cáo lãi gộp
-- [ ] Bước 9 — Job đối soát
-- [ ] Bước 10 — Opus review
+- [x] Bước 9 — Job đối soát
+- [ ] Bước 10 — Opus review  ← ĐANG MỞ
