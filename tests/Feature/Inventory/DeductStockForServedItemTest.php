@@ -38,6 +38,7 @@ use Illuminate\Support\Str;
 function nhapTonDau(Ingredient $ingredient, int $qty, int $cost, User $user): void
 {
     app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
         ingredientId: $ingredient->id,
         type: StockMovementType::Purchase,
         qtyDelta: $qty,
@@ -280,4 +281,41 @@ it('nguyên liệu không đủ tồn vẫn cho phục vụ, tồn cho phép v�
     expect($dongMon->refresh()->status)->toBe(OrderItemStatus::Served)
         ->and($dongMon->served_at)->not->toBeNull();
     expect(StockBalance::query()->find($ga->id)->qty)->toBe(100 - 300);
+});
+
+it('gọi lại trừ kho cho cùng dòng món vẫn chỉ ra một bộ dòng sổ cái, mã vân tay không đổi', function () {
+    $ga = Ingredient::factory()->create(['code' => 'T-GA-LAP']);
+    $sa = Ingredient::factory()->create(['code' => 'T-SA-LAP']);
+    nhapTonDau($ga, 5_000, 500_000, $this->user);
+    nhapTonDau($sa, 1_000, 30_000, $this->user);
+
+    $bienThe = taoBienTheCoDinhLuong([[$ga, 300], [$sa, 30]]);
+    $dongMon = goiMonChoBienThe($this->luot, $bienThe, 1, $this->user);
+
+    $action = app(DeductStockForServedItem::class);
+    $action->handle($dongMon, $this->user->id, $this->ca->id);
+
+    $vanTayLanDau = StockMovement::query()
+        ->where('ref_type', StockMovementRefType::OrderItem)
+        ->where('ref_id', $dongMon->id)
+        ->orderBy('ingredient_id')
+        ->pluck('uuid')
+        ->all();
+
+    // Gọi lại lần hai — cùng dữ liệu gốc thì mã vân tay sinh ra y hệt, nên kể
+    // cả khi lớp chặn theo ref_id có hỏng thì cũng không ghi thêm dòng nào.
+    $action->handle($dongMon->refresh(), $this->user->id, $this->ca->id);
+
+    $vanTayLanHai = StockMovement::query()
+        ->where('ref_type', StockMovementRefType::OrderItem)
+        ->where('ref_id', $dongMon->id)
+        ->orderBy('ingredient_id')
+        ->pluck('uuid')
+        ->all();
+
+    expect($vanTayLanHai)->toBe($vanTayLanDau)
+        ->and($vanTayLanDau)->toHaveCount(2);
+
+    expect(StockBalance::query()->find($ga->id)->qty)->toBe(5_000 - 300)
+        ->and(StockBalance::query()->find($sa->id)->qty)->toBe(1_000 - 30);
 });

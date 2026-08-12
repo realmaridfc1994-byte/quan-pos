@@ -39,6 +39,7 @@ it('1000 thao tác ngẫu nhiên không mất một đồng nào, hạt ngẫu n
                 $cost = mt_rand(1, 100) * $qty;
 
                 return $action->handle(new RecordStockMovementData(
+                    uuid: (string) Str::uuid(),
                     ingredientId: $ingredient->id,
                     type: StockMovementType::Purchase,
                     qtyDelta: $qty,
@@ -52,6 +53,7 @@ it('1000 thao tác ngẫu nhiên không mất một đồng nào, hạt ngẫu n
                 ));
             })(),
             2 => $action->handle(new RecordStockMovementData(
+                uuid: (string) Str::uuid(),
                 ingredientId: $ingredient->id,
                 type: StockMovementType::Sale,
                 // Vượt hẳn khoảng nhập (1-500) để cố tình đẩy tồn về 0 và xuống âm.
@@ -65,6 +67,7 @@ it('1000 thao tác ngẫu nhiên không mất một đồng nào, hạt ngẫu n
                 shiftId: null,
             )),
             3 => $action->handle(new RecordStockMovementData(
+                uuid: (string) Str::uuid(),
                 ingredientId: $ingredient->id,
                 type: StockMovementType::Stocktake,
                 qtyDelta: mt_rand(1, 300),
@@ -77,6 +80,7 @@ it('1000 thao tác ngẫu nhiên không mất một đồng nào, hạt ngẫu n
                 shiftId: null,
             )),
             4 => $action->handle(new RecordStockMovementData(
+                uuid: (string) Str::uuid(),
                 ingredientId: $ingredient->id,
                 type: StockMovementType::Stocktake,
                 qtyDelta: -mt_rand(1, 300),
@@ -89,6 +93,7 @@ it('1000 thao tác ngẫu nhiên không mất một đồng nào, hạt ngẫu n
                 shiftId: null,
             )),
             default => $action->handle(new RecordStockMovementData(
+                uuid: (string) Str::uuid(),
                 ingredientId: $ingredient->id,
                 type: StockMovementType::Return,
                 qtyDelta: -mt_rand(1, 200),

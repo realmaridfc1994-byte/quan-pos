@@ -78,6 +78,7 @@ it('gọi RecordStockMovement thì thành công, tồn kho đổi đúng', funct
     $user = User::factory()->owner()->create();
 
     $movement = (new RecordStockMovement)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
         ingredientId: $nl->id,
         type: StockMovementType::Purchase,
         qtyDelta: 100,

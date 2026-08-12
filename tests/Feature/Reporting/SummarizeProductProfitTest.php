@@ -30,6 +30,7 @@ use Illuminate\Support\Carbon;
 function ghiGiaVonChoDongMon(Ingredient $ga, OrderItem $item, int $soLuongTru, User $user): void
 {
     app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
         ingredientId: $ga->id,
         type: StockMovementType::Sale,
         qtyDelta: -$soLuongTru,
@@ -49,6 +50,7 @@ it('một lượt khách có giảm giá: lãi gộp từng dòng cộng lại b
 
     $ga = Ingredient::factory()->create();
     app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
         ingredientId: $ga->id,
         type: StockMovementType::Purchase,
         qtyDelta: 1_000,
@@ -188,4 +190,120 @@ it('chạy lại cho cùng một ngày thì ghi đè, không cộng dồn', func
     $dong = ProductProfitDaily::query()->where('date', $ngay->toDateString())->where('product_variant_id', $bienThe->id)->sole();
     expect($dong->revenue_amount)->toBe(20_000);
     expect(ProductProfitDaily::query()->where('date', $ngay->toDateString())->count())->toBe(1);
+});
+
+// ── HAI CON SỐ ĐỘ TIN CẬY (Bước 10) ──────────────────────────────────────
+// cost_amount = 0 có thể là "món không tốn nguyên liệu", cũng có thể là
+// "không ai biết nó tốn bao nhiêu". Hai cột dưới phân biệt hai chuyện đó.
+
+it('bán 10 phần lúc tồn dương và 5 phần lúc tồn âm thì qty_no_cost đếm đúng 5', function () {
+    $ngay = Carbon::parse('2026-08-14');
+    $chuQuan = User::factory()->owner()->create();
+
+    // Tồn đầu chỉ đủ cho 10 phần (mỗi phần ăn 1 đơn vị).
+    $ga = Ingredient::factory()->create();
+    app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
+        ingredientId: $ga->id,
+        type: StockMovementType::Purchase,
+        qtyDelta: 10,
+        knownCost: 100_000, // 10.000đ / đơn vị
+        refType: StockMovementRefType::Manual,
+        refId: null,
+        reason: null,
+        approvedByUserId: null,
+        createdByUserId: $chuQuan->id,
+        shiftId: null,
+    ));
+
+    $ca = Shift::factory()->closed()->create(['opened_at' => $ngay->clone()->setTime(18, 0)]);
+    $session = TableSession::factory()->withTable()->create(['shift_id' => $ca->id, 'opened_at' => $ngay->clone()->setTime(18, 10)]);
+
+    $category = Category::factory()->create();
+    $mon = Product::factory()->for($category)->create(['name' => 'Lẩu gà']);
+    $bienThe = ProductVariant::factory()->for($mon)->create(['price' => 50_000]);
+
+    $order = Order::factory()->for($session, 'tableSession')->create(['sent_at' => $ngay->clone()->setTime(19, 0)]);
+
+    $dongDu = OrderItem::factory()->for($order, 'order')->create([
+        'product_id' => $mon->id, 'product_variant_id' => $bienThe->id,
+        'unit_price' => 50_000, 'options_amount' => 0, 'quantity' => 10,
+        'status' => OrderItemStatus::Served, 'served_at' => $ngay->clone()->setTime(19, 10),
+    ]);
+    $dongAm = OrderItem::factory()->for($order, 'order')->create([
+        'product_id' => $mon->id, 'product_variant_id' => $bienThe->id,
+        'unit_price' => 50_000, 'options_amount' => 0, 'quantity' => 5,
+        'status' => OrderItemStatus::Served, 'served_at' => $ngay->clone()->setTime(19, 20),
+    ]);
+
+    // 10 phần đầu trừ hết sạch tồn — vẫn biết giá vốn.
+    ghiGiaVonChoDongMon($ga, $dongDu, 10, $chuQuan);
+    // 5 phần sau bán lúc kho đã về 0 → has_cost = false, cost_delta = 0.
+    ghiGiaVonChoDongMon($ga, $dongAm, 5, $chuQuan);
+
+    app(SummarizeProductProfit::class)->handle($ngay->toDateString());
+
+    $dong = ProductProfitDaily::query()->where('product_variant_id', $bienThe->id)->sole();
+
+    expect($dong->quantity_sold)->toBe(15)
+        ->and($dong->qty_no_cost)->toBe(5)
+        ->and($dong->qty_not_served)->toBe(0)
+        // Giá vốn chỉ ghi được phần biết thật, KHÔNG bịa cho 5 phần kia.
+        ->and($dong->cost_amount)->toBe(100_000);
+});
+
+it('lượt khách đã đóng mà còn món chưa bấm xong thì qty_not_served đếm đúng', function () {
+    $ngay = Carbon::parse('2026-08-15');
+    $ca = Shift::factory()->closed()->create(['opened_at' => $ngay->clone()->setTime(18, 0)]);
+    $session = TableSession::factory()->withTable()->closed()->create([
+        'shift_id' => $ca->id,
+        'opened_at' => $ngay->clone()->setTime(18, 10),
+        'closed_at' => $ngay->clone()->setTime(21, 0),
+    ]);
+
+    $category = Category::factory()->create();
+    $mon = Product::factory()->for($category)->create();
+    $bienThe = ProductVariant::factory()->for($mon)->create(['price' => 20_000]);
+
+    $order = Order::factory()->for($session, 'tableSession')->create(['sent_at' => $ngay->clone()->setTime(19, 0)]);
+
+    OrderItem::factory()->for($order, 'order')->create([
+        'product_id' => $mon->id, 'product_variant_id' => $bienThe->id,
+        'unit_price' => 20_000, 'options_amount' => 0, 'quantity' => 4,
+        'status' => OrderItemStatus::Served, 'served_at' => $ngay->clone()->setTime(19, 30),
+    ]);
+    OrderItem::factory()->for($order, 'order')->create([
+        'product_id' => $mon->id, 'product_variant_id' => $bienThe->id,
+        'unit_price' => 20_000, 'options_amount' => 0, 'quantity' => 3,
+        'status' => OrderItemStatus::Ordered, 'served_at' => null,
+    ]);
+
+    app(SummarizeProductProfit::class)->handle($ngay->toDateString());
+
+    $dong = ProductProfitDaily::query()->where('product_variant_id', $bienThe->id)->sole();
+
+    expect($dong->quantity_sold)->toBe(7)
+        ->and($dong->qty_not_served)->toBe(3)
+        ->and($dong->qty_no_cost)->toBe(0);
+});
+
+it('bàn còn đang ăn dở, món chưa bưng ra thì KHÔNG tính là bếp quên bấm xong', function () {
+    $ngay = Carbon::parse('2026-08-16');
+    $ca = Shift::factory()->closed()->create(['opened_at' => $ngay->clone()->setTime(18, 0)]);
+    $session = TableSession::factory()->withTable()->create(['shift_id' => $ca->id, 'opened_at' => $ngay->clone()->setTime(18, 10)]);
+
+    $category = Category::factory()->create();
+    $mon = Product::factory()->for($category)->create();
+    $bienThe = ProductVariant::factory()->for($mon)->create(['price' => 20_000]);
+
+    $order = Order::factory()->for($session, 'tableSession')->create(['sent_at' => $ngay->clone()->setTime(19, 0)]);
+    OrderItem::factory()->for($order, 'order')->create([
+        'product_id' => $mon->id, 'product_variant_id' => $bienThe->id,
+        'unit_price' => 20_000, 'options_amount' => 0, 'quantity' => 3,
+        'status' => OrderItemStatus::Ordered, 'served_at' => null,
+    ]);
+
+    app(SummarizeProductProfit::class)->handle($ngay->toDateString());
+
+    expect(ProductProfitDaily::query()->where('product_variant_id', $bienThe->id)->sole()->qty_not_served)->toBe(0);
 });

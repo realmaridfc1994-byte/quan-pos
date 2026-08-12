@@ -34,6 +34,7 @@ beforeEach(function () {
 function nhapTonDauDoiSoat(Ingredient $ingredient, int $qty, int $cost, User $user): void
 {
     app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
         ingredientId: $ingredient->id,
         type: StockMovementType::Purchase,
         qtyDelta: $qty,
@@ -157,6 +158,7 @@ it('dòng sổ cái mồ côi (trỏ về order_item chưa served) bị phát hi
     ]);
 
     $movement = app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
         ingredientId: $ga->id,
         type: StockMovementType::Sale,
         qtyDelta: -5,
@@ -280,4 +282,142 @@ it('job đối soát lỗi thì đóng ca vẫn thành công', function () {
     ));
 
     expect($caDaDong->status)->toBe(ShiftStatus::Closed);
+});
+
+// ── HAI MỤC CẢNH BÁO (Bước 10) ───────────────────────────────────────────
+// Không phải lỗi sổ sách — là việc cần dọn. Chúng KHÔNG được làm sach() sai,
+// vì lệnh đối soát đỏ mỗi đêm là lệnh không ai còn đọc.
+
+/** Bán quá tồn để sổ cái ghi ra dòng has_cost = false (tồn về âm). */
+function banQuaTon(Ingredient $ingredient, int $soLuong, OrderItem $item, User $user): void
+{
+    app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
+        ingredientId: $ingredient->id,
+        type: StockMovementType::Sale,
+        qtyDelta: -$soLuong,
+        knownCost: null,
+        refType: StockMovementRefType::OrderItem,
+        refId: $item->id,
+        reason: null,
+        approvedByUserId: null,
+        createdByUserId: $user->id,
+        shiftId: null,
+    ));
+}
+
+it('mục 4 đếm đúng số dòng sổ cái chưa xác định được giá vốn, theo từng nguyên liệu', function () {
+    $ga = Ingredient::factory()->create(['name' => 'Gà ta']);
+    $sa = Ingredient::factory()->create(['name' => 'Sả']);
+    nhapTonDauDoiSoat($ga, 10, 100_000, $this->chuQuan);
+    nhapTonDauDoiSoat($sa, 10, 50_000, $this->chuQuan);
+
+    $ca = Shift::factory()->closed()->create();
+    $luot = TableSession::factory()->withTable()->create(['shift_id' => $ca->id]);
+    $order = Order::factory()->for($luot, 'tableSession')->create(['sent_at' => now()]);
+
+    $bienThe = ProductVariant::factory()->for(Product::factory()->for(Category::factory())->create())->create(['deducts_stock' => true]);
+    Recipe::factory()->for($bienThe, 'productVariant')->for($ga, 'ingredient')->create(['qty_base' => 1]);
+
+    $taoDongMon = fn (): OrderItem => OrderItem::factory()->for($order, 'order')->create([
+        'product_variant_id' => $bienThe->id,
+        'status' => OrderItemStatus::Served,
+        'served_at' => now(),
+    ]);
+
+    // Dòng đầu vét sạch tồn gà (vẫn biết giá vốn), hai dòng sau bán lúc kho âm.
+    banQuaTon($ga, 10, $taoDongMon(), $this->chuQuan);
+    banQuaTon($ga, 3, $taoDongMon(), $this->chuQuan);
+    banQuaTon($ga, 2, $taoDongMon(), $this->chuQuan);
+    // Sả bán trong tồn dương — không bao giờ vào mục này.
+    banQuaTon($sa, 5, $taoDongMon(), $this->chuQuan);
+
+    $ketQua = $this->action->handle(Carbon::today(), Carbon::today());
+
+    expect($ketQua->thieuGiaVon)->toHaveCount(1)
+        ->and($ketQua->thieuGiaVon[0]['ingredient_name'])->toBe('Gà ta')
+        ->and($ketQua->thieuGiaVon[0]['so_dong'])->toBe(2);
+
+    // CẢNH BÁO, KHÔNG PHẢI LỖI: sổ cái vẫn khớp bảng tồn.
+    expect($ketQua->sach())->toBeTrue()
+        ->and($ketQua->coCanhBao())->toBeTrue();
+});
+
+it('mục 5 liệt kê đúng dòng món của lượt khách đã đóng mà bếp quên bấm xong', function () {
+    $ca = Shift::factory()->closed()->create();
+    $luotDaDong = TableSession::factory()->withTable()->closed()->create([
+        'shift_id' => $ca->id,
+        'closed_at' => now(),
+    ]);
+    $luotConMo = TableSession::factory()->withTable()->create(['shift_id' => $ca->id]);
+
+    $bienThe = ProductVariant::factory()->for(Product::factory()->for(Category::factory())->create())->create();
+
+    $orderDaDong = Order::factory()->for($luotDaDong, 'tableSession')->create(['sent_at' => now()]);
+    OrderItem::factory()->for($orderDaDong, 'order')->create([
+        'product_variant_id' => $bienThe->id, 'product_name' => 'Lẩu gà',
+        'status' => OrderItemStatus::Ordered, 'served_at' => null,
+    ]);
+    OrderItem::factory()->for($orderDaDong, 'order')->create([
+        'product_variant_id' => $bienThe->id,
+        'status' => OrderItemStatus::Served, 'served_at' => now(),
+    ]);
+
+    // Bàn còn đang ăn dở — món chưa bưng ra là chuyện bình thường, không đếm.
+    $orderConMo = Order::factory()->for($luotConMo, 'tableSession')->create(['sent_at' => now()]);
+    OrderItem::factory()->for($orderConMo, 'order')->create([
+        'product_variant_id' => $bienThe->id,
+        'status' => OrderItemStatus::Ordered, 'served_at' => null,
+    ]);
+
+    $ketQua = $this->action->handle(Carbon::today(), Carbon::today());
+
+    expect($ketQua->quenBamXong)->toHaveCount(1)
+        ->and($ketQua->quenBamXong[0]['product_name'])->toBe('Lẩu gà')
+        ->and($ketQua->quenBamXong[0]['table_session_code'])->toBe($luotDaDong->code);
+
+    expect($ketQua->sach())->toBeTrue()
+        ->and($ketQua->coCanhBao())->toBeTrue();
+});
+
+it('kho sạch sẽ thì hai mục cảnh báo đều rỗng và lệnh stock:doi-soat vẫn báo thành công', function () {
+    $ga = Ingredient::factory()->create();
+    nhapTonDauDoiSoat($ga, 100, 500_000, $this->chuQuan);
+
+    $ketQua = $this->action->handle(Carbon::today(), Carbon::today());
+
+    expect($ketQua->thieuGiaVon)->toBe([])
+        ->and($ketQua->quenBamXong)->toBe([])
+        ->and($ketQua->coCanhBao())->toBeFalse();
+
+    $this->artisan('stock:doi-soat')
+        ->expectsOutputToContain('4. Dòng sổ cái chưa xác định được giá vốn')
+        ->expectsOutputToContain('mọi lần xuất kho trong kỳ đều biết giá vốn')
+        ->expectsOutputToContain('5. Món đã tính tiền mà bếp chưa bấm xong')
+        ->assertSuccessful();
+});
+
+it('lệnh stock:doi-soat in đúng số dòng thiếu giá vốn và VẪN trả về thành công — cảnh báo không phải lỗi', function () {
+    $ga = Ingredient::factory()->create(['name' => 'Gà ta']);
+    nhapTonDauDoiSoat($ga, 5, 50_000, $this->chuQuan);
+
+    $ca = Shift::factory()->closed()->create();
+    $luot = TableSession::factory()->withTable()->create(['shift_id' => $ca->id]);
+    $order = Order::factory()->for($luot, 'tableSession')->create(['sent_at' => now()]);
+    $bienThe = ProductVariant::factory()->for(Product::factory()->for(Category::factory())->create())->create();
+
+    $taoDongMon = fn (): OrderItem => OrderItem::factory()->for($order, 'order')->create([
+        'product_variant_id' => $bienThe->id,
+        'status' => OrderItemStatus::Served,
+        'served_at' => now(),
+    ]);
+
+    banQuaTon($ga, 5, $taoDongMon(), $this->chuQuan);
+    banQuaTon($ga, 4, $taoDongMon(), $this->chuQuan);
+
+    $this->artisan('stock:doi-soat')
+        ->expectsOutputToContain('1 dòng ở 1 nguyên liệu')
+        ->expectsOutputToContain('Gà ta: 1 dòng')
+        ->expectsOutputToContain('Nhưng có việc cần dọn')
+        ->assertSuccessful();
 });

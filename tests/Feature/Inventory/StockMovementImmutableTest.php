@@ -19,6 +19,7 @@ use Livewire\Livewire;
 beforeEach(function () {
     $this->ingredient = Ingredient::factory()->create();
     $this->movement = app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
         ingredientId: $this->ingredient->id,
         type: StockMovementType::Purchase,
         qtyDelta: 100,
@@ -56,6 +57,7 @@ it('màn hình Hao hụt không có nút Xoá', function () {
     $this->actingAs($chuQuan);
 
     $dongHaoHut = app(WriteOffStock::class)->handle(new WriteOffStockData(
+        uuid: (string) Str::uuid(),
         ingredientId: $this->ingredient->id,
         category: WasteReasonCategory::Broken,
         detail: 'Vỡ khi bưng bê',

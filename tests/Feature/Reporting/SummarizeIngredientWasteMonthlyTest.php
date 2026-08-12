@@ -22,6 +22,7 @@ beforeEach(function () {
 function nhapTonDauHaoHut(Ingredient $ingredient, int $qty, int $cost, User $user): void
 {
     app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
         ingredientId: $ingredient->id,
         type: StockMovementType::Purchase,
         qtyDelta: $qty,
@@ -38,6 +39,7 @@ function nhapTonDauHaoHut(Ingredient $ingredient, int $qty, int $cost, User $use
 function ghiHaoHutVaoNgay(Ingredient $ingredient, int $qty, User $user, Carbon $ngay): void
 {
     $movement = app(WriteOffStock::class)->handle(new WriteOffStockData(
+        uuid: (string) Str::uuid(),
         ingredientId: $ingredient->id,
         category: WasteReasonCategory::Broken,
         detail: 'Vỡ khi bưng bê',

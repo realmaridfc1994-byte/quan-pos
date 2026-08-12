@@ -25,6 +25,7 @@ beforeEach(function () {
 function ghiSoCai(RecordStockMovement $action, Ingredient $ingredient, User $user, array $override = []): StockMovement
 {
     $data = new RecordStockMovementData(
+        uuid: $override['uuid'] ?? (string) Str::uuid(),
         ingredientId: $override['ingredientId'] ?? $ingredient->id,
         type: $override['type'] ?? StockMovementType::Purchase,
         qtyDelta: $override['qtyDelta'] ?? 100,

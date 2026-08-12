@@ -7,6 +7,7 @@ namespace App\Domain\Inventory\Queries;
 use App\Domain\Catalog\Models\ProductVariant;
 use App\Domain\Inventory\Models\StockBalance;
 use App\Support\Money;
+use App\Support\StockCost;
 
 /**
  * Giá vốn ước tính của một biến thể = tổng (số lượng định lượng × giá vốn
@@ -52,6 +53,10 @@ final class EstimateVariantCost
             return Money::zero();
         }
 
-        return Money::fromInt((int) round($balance->total_cost / $balance->qty));
+        // Chia bằng StockCost::lamTron, KHÔNG bằng round($a / $b): phép chia
+        // của PHP đổi hai số nguyên thành số thực, và số thực chỉ giữ đúng
+        // được 15-16 chữ số. Tới khoảng vài triệu tỉ đồng thì nó bắt đầu sai
+        // một vài đồng — và tiền thì không được phép sai một đồng nào.
+        return Money::fromInt(StockCost::lamTron($balance->total_cost, $balance->qty));
     }
 }

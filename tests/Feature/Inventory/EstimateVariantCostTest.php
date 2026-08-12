@@ -50,6 +50,50 @@ it('món chưa có định lượng thì giá vốn ước tính là 0', functio
     expect($giaVon->isZero())->toBeTrue();
 });
 
+it('chia số tiền rất lớn vẫn ra đúng từng đồng, không mượn số thực', function () {
+    $mon = ProductVariant::factory()->create(['deducts_stock' => true]);
+    $ga = Ingredient::factory()->create();
+
+    // Con số này CỐ Ý phi lý với một quán nhậu — nó ở ngay chỗ số thực của
+    // máy tính bắt đầu mất chính xác (khoảng 9 triệu tỉ). Trước khi sửa, code
+    // chia bằng round($total_cost / $qty): máy đổi hai số nguyên thành số
+    // thực, làm tròn mất đúng một đồng rồi mới chia, ra 4.503.599.627.370.496.
+    // Chia bằng số nguyên ra đúng 4.503.599.627.370.497.
+    //
+    // Ở quy mô thật của quán hai cách cho kết quả y hệt nhau. Test này không
+    // gác một lỗi đang xảy ra, nó gác CÁCH LÀM: chia tiền bằng số thực là
+    // đúng nhờ số còn nhỏ, không phải đúng nhờ thiết kế.
+    StockBalance::choPhepGhi(fn () => StockBalance::query()->create([
+        'ingredient_id' => $ga->id,
+        'qty' => 2,
+        'total_cost' => 9_007_199_254_740_993,
+    ]));
+
+    Recipe::query()->create(['product_variant_id' => $mon->id, 'ingredient_id' => $ga->id, 'qty_base' => 1]);
+
+    $giaVon = app(EstimateVariantCost::class)->handle($mon->fresh());
+
+    expect($giaVon->amount)->toBe(4_503_599_627_370_497)
+        ->and($giaVon->amount)->not->toBe((int) round(9_007_199_254_740_993 / 2));
+});
+
+it('chia lẻ ở mức tiền bình thường làm tròn nửa lên, không đổi so với trước', function () {
+    $mon = ProductVariant::factory()->create(['deducts_stock' => true]);
+    $ga = Ingredient::factory()->create();
+
+    // 1000 đồng cho 8 gam = 125 đồng/gam chẵn; đổi thành 1005/8 = 125,625
+    // để ép ra phần lẻ, làm tròn lên 126.
+    StockBalance::choPhepGhi(fn () => StockBalance::query()->create([
+        'ingredient_id' => $ga->id,
+        'qty' => 8,
+        'total_cost' => 1_005,
+    ]));
+
+    Recipe::query()->create(['product_variant_id' => $mon->id, 'ingredient_id' => $ga->id, 'qty_base' => 1]);
+
+    expect(app(EstimateVariantCost::class)->handle($mon->fresh())->amount)->toBe(126);
+});
+
 it('nguyên liệu chưa từng nhập hàng thì tính giá vốn là 0, không lỗi', function () {
     $mon = ProductVariant::factory()->create(['deducts_stock' => true]);
     $ga = Ingredient::factory()->create();

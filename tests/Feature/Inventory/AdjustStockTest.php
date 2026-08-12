@@ -14,6 +14,8 @@ use App\Domain\Inventory\Models\StockMovement;
 use App\Domain\Staffing\Actions\VerifyApproverPin;
 use App\Domain\Staffing\Models\User;
 use App\Exceptions\DomainException;
+use Illuminate\Support\Str;
+use Spatie\Activitylog\Models\Activity;
 
 beforeEach(function () {
     $this->action = new AdjustStock(new VerifyApproverPin, new RecordStockMovement);
@@ -21,6 +23,7 @@ beforeEach(function () {
     $this->chuQuan = User::factory()->owner()->withPin('1234')->create();
 
     app(RecordStockMovement::class)->handle(new RecordStockMovementData(
+        uuid: (string) Str::uuid(),
         ingredientId: $this->ingredient->id,
         type: StockMovementType::Purchase,
         qtyDelta: 1_000,
@@ -34,9 +37,10 @@ beforeEach(function () {
     ));
 });
 
-function dieuChinhTon(AdjustStock $action, Ingredient $ingredient, User $chuQuan, User $nguoiDuyet, string $pin, int $qtyDelta, string $reason = 'Đếm lại thấy lệch so với sổ sách, kiểm tra kỹ rồi mới sửa'): StockMovement
+function dieuChinhTon(AdjustStock $action, Ingredient $ingredient, User $chuQuan, User $nguoiDuyet, string $pin, int $qtyDelta, string $reason = 'Đếm lại thấy lệch so với sổ sách, kiểm tra kỹ rồi mới sửa', ?string $uuid = null): StockMovement
 {
     return $action->handle(new AdjustStockData(
+        uuid: $uuid ?? (string) Str::uuid(),
         ingredientId: $ingredient->id,
         qtyDelta: $qtyDelta,
         reason: $reason,
@@ -97,4 +101,42 @@ it('người duyệt PIN phải là chủ quán, thu ngân duyệt hộ cũng b�
 it('số lượng điều chỉnh bằng 0 bị chặn', function () {
     expect(fn () => dieuChinhTon($this->action, $this->ingredient, $this->chuQuan, $this->chuQuan, '1234', 0))
         ->toThrow(DomainException::class, 'Số lượng điều chỉnh không được bằng 0.');
+});
+
+// ── CHỐNG GHI TRÙNG THEO MÃ VÂN TAY (Bước 10) ────────────────────────────
+
+it('điều chỉnh hai lần cùng mã vân tay chỉ ghi một dòng sổ cái, tồn chỉ đổi một lần', function () {
+    $vanTay = (string) Str::uuid();
+
+    $lanDau = dieuChinhTon($this->action, $this->ingredient, $this->chuQuan, $this->chuQuan, '1234', -50, uuid: $vanTay);
+    $lanHai = dieuChinhTon($this->action, $this->ingredient, $this->chuQuan, $this->chuQuan, '1234', -50, uuid: $vanTay);
+
+    expect($lanHai->id)->toBe($lanDau->id);
+
+    expect(StockMovement::query()->where('type', StockMovementType::Adjust)->count())->toBe(1);
+    expect(StockBalance::query()->find($this->ingredient->id)->qty)->toBe(950);
+});
+
+it('hai mã vân tay khác nhau thì ghi thành hai dòng điều chỉnh riêng', function () {
+    dieuChinhTon($this->action, $this->ingredient, $this->chuQuan, $this->chuQuan, '1234', -50);
+    dieuChinhTon($this->action, $this->ingredient, $this->chuQuan, $this->chuQuan, '1234', -50);
+
+    expect(StockMovement::query()->where('type', StockMovementType::Adjust)->count())->toBe(2);
+    expect(StockBalance::query()->find($this->ingredient->id)->qty)->toBe(900);
+});
+
+it('bấm lại lần hai không đẻ thêm dòng nhật ký thử PIN', function () {
+    $vanTay = (string) Str::uuid();
+
+    $lanDau = dieuChinhTon($this->action, $this->ingredient, $this->chuQuan, $this->chuQuan, '1234', -50, uuid: $vanTay);
+
+    // Cố tình gửi lại kèm PIN SAI. Nếu Action không tra mã vân tay TRƯỚC bước
+    // hỏi PIN, lần bấm lại này sẽ nổ lỗi "Mã PIN không đúng" và ghi một dòng
+    // 'pin-verify' vào nhật ký — trong khi thực tế chẳng có gì được ghi thêm
+    // vào kho cả.
+    $lanHai = dieuChinhTon($this->action, $this->ingredient, $this->chuQuan, $this->chuQuan, '9999', -50, uuid: $vanTay);
+
+    expect($lanHai->id)->toBe($lanDau->id);
+    expect(StockMovement::query()->where('type', StockMovementType::Adjust)->count())->toBe(1);
+    expect(Activity::query()->where('log_name', 'pin-verify')->count())->toBe(0);
 });
