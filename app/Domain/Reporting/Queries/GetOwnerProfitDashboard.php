@@ -42,7 +42,9 @@ final class GetOwnerProfitDashboard
             'canh_bao_moc_ngay' => $this->canhBaoMocNgay($dauThangNay),
             'lai_gop_theo_tong' => $tongHopThangNay->sortByDesc('profit_amount')->take(self::TOP_N)->values()->all(),
             'lai_gop_theo_ti_le' => $tongHopThangNay
-                ->filter(fn (array $d) => $d['revenue_amount'] > 0)
+                // Món chưa biết giá vốn không có tỉ lệ lãi để xếp hạng — bỏ ra
+                // khỏi bảng xếp hạng chứ KHÔNG coi như tỉ lệ 0%.
+                ->filter(fn (array $d) => $d['revenue_amount'] > 0 && $d['margin'] !== null)
                 ->sortByDesc('margin')
                 ->take(self::TOP_N)
                 ->values()
@@ -55,13 +57,17 @@ final class GetOwnerProfitDashboard
     }
 
     /**
-     * @return Collection<int, array{product_id: int, product_variant_id: int, product_name: string, variant_name: string, quantity_sold: int, revenue_amount: int, cost_amount: int, profit_amount: int, margin: float}>
+     * `profit_amount`/`margin` là NULL khi TOÀN BỘ doanh thu của món đó trong
+     * kỳ chưa biết giá vốn (K19) — không được trả 0, vì 0 nghĩa là "hoà vốn
+     * thật", còn đây là "không ai biết". Màn hình phải hiện gạch ngang.
+     *
+     * @return Collection<int, array{product_id: int, product_variant_id: int, product_name: string, variant_name: string, quantity_sold: int, revenue_amount: int, revenue_uncosted_amount: int, cost_amount: int, profit_amount: int|null, margin: float|null}>
      */
     private function tongHopThangNay(Carbon $tu, Carbon $den): Collection
     {
         $tongHop = ProductProfitDaily::query()
             ->whereBetween('date', [$tu->toDateString(), $den->toDateString()])
-            ->selectRaw('product_id, product_variant_id, SUM(quantity_sold) as so_luong, SUM(revenue_amount) as doanh_thu, SUM(cost_amount) as gia_von, SUM(qty_no_cost) as sl_thieu_gia_von, SUM(qty_not_served) as sl_chua_bung_ra')
+            ->selectRaw('product_id, product_variant_id, SUM(quantity_sold) as so_luong, SUM(revenue_amount) as doanh_thu, SUM(revenue_uncosted_amount) as doanh_thu_chua_biet, SUM(cost_amount) as gia_von, SUM(qty_no_cost) as sl_thieu_gia_von, SUM(qty_not_served) as sl_chua_bung_ra')
             ->groupBy('product_id', 'product_variant_id')
             ->get();
 
@@ -75,12 +81,16 @@ final class GetOwnerProfitDashboard
             $v = $bienThe->get((int) $dong->product_variant_id);
             $doanhThu = (int) $dong->doanh_thu;
             $giaVon = (int) $dong->gia_von;
-            $laiGop = $doanhThu - $giaVon;
+            $chuaBiet = (int) $dong->doanh_thu_chua_biet;
+            // K19: lãi gộp CHỈ tính trên phần đã biết giá vốn. Phần chưa biết
+            // không phải lãi 100%, cũng không phải hoà vốn — nó là không biết.
+            $doanhThuDaBiet = $doanhThu - $chuaBiet;
+            $laiGop = $doanhThuDaBiet === 0 ? null : $doanhThuDaBiet - $giaVon;
             $soLuong = (int) $dong->so_luong;
             $thieuGiaVon = (int) $dong->sl_thieu_gia_von;
             $chuaBungRa = (int) $dong->sl_chua_bung_ra;
             $tenMon = $v?->product?->name ?? '(món đã xoá)';
-            $margin = $doanhThu > 0 ? $laiGop / $doanhThu : 0.0;
+            $margin = $laiGop === null ? null : $laiGop / $doanhThuDaBiet;
 
             return [
                 'product_id' => (int) $dong->product_id,
@@ -89,6 +99,7 @@ final class GetOwnerProfitDashboard
                 'variant_name' => $v?->name ?? '',
                 'quantity_sold' => $soLuong,
                 'revenue_amount' => $doanhThu,
+                'revenue_uncosted_amount' => $chuaBiet,
                 'cost_amount' => $giaVon,
                 'profit_amount' => $laiGop,
                 'margin' => $margin,
@@ -148,7 +159,7 @@ final class GetOwnerProfitDashboard
      * nêu rõ CON SỐ LÃI ĐANG CAO HƠN THỰC TẾ chứ không chỉ nói "thiếu dữ liệu".
      * Món nào không thiếu gì thì trả về null (màn hình không hiện dấu nào).
      */
-    private function cauCanhBao(string $tenMon, int $soLuong, int $thieuGiaVon, int $chuaBungRa, float $margin): ?string
+    private function cauCanhBao(string $tenMon, int $soLuong, int $thieuGiaVon, int $chuaBungRa, ?float $margin): ?string
     {
         if ($thieuGiaVon === 0 && $chuaBungRa === 0) {
             return null;
@@ -162,10 +173,16 @@ final class GetOwnerProfitDashboard
             $ve[] = "{$chuaBungRa} phần bếp chưa bấm xong";
         }
 
+        $dau = "Trong {$soLuong} phần {$tenMon} tháng này, ".implode(', và ', $ve);
+
+        // Cả kỳ không có phần nào biết giá vốn: không có con số lãi nào để so.
+        if ($margin === null) {
+            return $dau.'. KHÔNG tính được lãi của món này — không phải lãi 0đ, mà là chưa biết.';
+        }
+
         $tiLe = number_format($margin * 100, 1).'%';
 
-        return "Trong {$soLuong} phần {$tenMon} tháng này, ".implode(', và ', $ve).
-            ". Con số lãi {$tiLe} đang CAO HƠN thực tế.";
+        return $dau.". Con số lãi {$tiLe} chỉ tính trên phần đã biết giá vốn, lãi thật của cả kỳ THẤP HƠN.";
     }
 
     /**
@@ -186,7 +203,10 @@ final class GetOwnerProfitDashboard
         $nguongLaiThap = $this->cauHinhQuan->nguongLaiThapTiLe();
 
         return $tongHopThangNay
+            // margin null = chưa biết giá vốn. KHÔNG được gọi một món là "lãi
+            // thấp" khi chưa ai biết nó lãi bao nhiêu.
             ->filter(fn (array $d) => $d['revenue_amount'] > 0
+                && $d['margin'] !== null
                 && $d['quantity_sold'] >= $trungBinhSoLuong
                 && $d['margin'] < $nguongLaiThap)
             ->sortBy('margin')

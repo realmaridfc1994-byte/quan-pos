@@ -80,7 +80,7 @@ const DONG_MIEN_TRU = [
     // Ngoại lệ HẾT HIỆU LỰC ngay nếu tỉ lệ này được dùng để chia tiền thật (ví
     // dụ tính thưởng theo phần trăm) — lúc đó phải đổi sang số nguyên phần vạn.
     'Domain/Reporting/Queries/GetOwnerProfitDashboard.php' => [
-        '$margin = $doanhThu > 0 ? $laiGop / $doanhThu : 0.0;',
+        '$margin = $laiGop === null ? null : $laiGop / $doanhThuDaBiet;',
     ],
 ];
 

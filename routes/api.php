@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\OrderItemController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\PurchaseController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ShiftController;
 use App\Http\Controllers\Api\SyncBatchController;
 use App\Http\Controllers\Api\SyncConflictController;
@@ -43,6 +44,10 @@ Route::prefix('v1')->group(function (): void {
     Route::middleware(['auth:sanctum', 'active'])->group(function (): void {
         Route::get('menu', [MenuController::class, 'index']);
         Route::get('floor-plan', [FloorPlanController::class, 'index']);
+
+        // Báo cáo tổng hợp: mọi vai trò xem được doanh thu; lãi gộp và giá vốn
+        // bị Resource cắt khỏi JSON nếu không có quyền `view-cost-profit`.
+        Route::get('reports/summary', [ReportController::class, 'summary']);
 
         Route::prefix('table-sessions')->group(function (): void {
             Route::post('/', [TableSessionController::class, 'open'])->middleware('idempotent');

@@ -58,7 +58,8 @@ it('món bán lúc kho âm và món bếp quên bấm xong đều bị đánh d�
         ->and($dong['qty_not_served'])->toBe(7)
         ->and($dong['canh_bao'])->toBe(
             'Trong 120 phần Lẩu gà tháng này, 15 phần bán lúc kho đang âm nên chưa tính được giá vốn, '.
-            'và 7 phần bếp chưa bấm xong. Con số lãi 68.0% đang CAO HƠN thực tế.'
+            'và 7 phần bếp chưa bấm xong. Con số lãi 68.0% chỉ tính trên phần đã biết giá vốn, '.
+            'lãi thật của cả kỳ THẤP HƠN.'
         );
 
     expect($duLieu['thieu_gia_von']['so_mon'])->toBe(1)
