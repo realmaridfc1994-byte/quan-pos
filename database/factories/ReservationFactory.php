@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Factories;
 
+use App\Domain\Reservations\Enums\DepositStatus;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Staffing\Models\User;
@@ -26,9 +27,14 @@ class ReservationFactory extends Factory
             'reserved_at' => now()->addHours(fake()->numberBetween(1, 48)),
             'status' => ReservationStatus::Pending,
             'note' => null,
+            'status_reason' => null,
             'created_by_user_id' => User::factory(),
             'status_changed_by_user_id' => null,
             'status_changed_at' => null,
+            'deposit_status' => DepositStatus::Unhandled,
+            'deposit_handled_by_user_id' => null,
+            'deposit_handled_at' => null,
+            'deposit_handled_note' => null,
         ];
     }
 
@@ -45,7 +51,18 @@ class ReservationFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'status' => ReservationStatus::Cancelled,
-            'note' => 'Khách báo huỷ',
+            'status_reason' => 'Khách báo huỷ',
+            'status_changed_by_user_id' => User::factory(),
+            'status_changed_at' => now(),
+        ]);
+    }
+
+    /** Khách không tới — ck_reservations_status_reason đòi đủ ai/lúc nào/vì sao. */
+    public function noShow(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'status' => ReservationStatus::NoShow,
+            'status_reason' => 'Quá 30 phút không thấy khách, gọi không nghe máy',
             'status_changed_by_user_id' => User::factory(),
             'status_changed_at' => now(),
         ]);

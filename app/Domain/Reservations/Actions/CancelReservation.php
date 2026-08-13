@@ -15,9 +15,14 @@ use Illuminate\Support\Facades\DB;
  * Huỷ một đặt bàn (M1: hợp lệ từ pending hoặc confirmed).
  *
  * Huỷ phải có lý do (M2, luật 13 CLAUDE.md — "huỷ = đổi trạng thái + ghi
- * ai/lúc nào/vì sao"), chốt cứng thêm ở DB (ck_reservations_cancel_reason).
+ * ai/lúc nào/vì sao"), chốt cứng thêm ở DB (ck_reservations_status_reason).
+ *
+ * Lý do ghi vào `status_reason`. TRƯỚC ĐÂY GHI ĐÈ LÊN `note` — mà `note` là
+ * ghi chú của KHÁCH ("bàn gần quạt", "có trẻ nhỏ", "sinh nhật"), nên huỷ một
+ * cái là ghi chú của khách mất vĩnh viễn, không khôi phục được. Sửa 13/08.
+ *
  * KHÔNG tự động hoàn tiền cọc (M8, cùng quyết định với MarkNoShow) — thu
- * ngân tự xử lý bằng VoidPayment nếu cần.
+ * ngân tự xử lý bằng VoidPayment rồi đánh dấu lại bằng MarkDepositHandled.
  */
 final class CancelReservation
 {
@@ -39,7 +44,7 @@ final class CancelReservation
 
             $reservation->update([
                 'status' => ReservationStatus::Cancelled,
-                'note' => $lyDo,
+                'status_reason' => $lyDo,
                 'status_changed_by_user_id' => $data->cancelledByUserId,
                 'status_changed_at' => now(),
             ]);

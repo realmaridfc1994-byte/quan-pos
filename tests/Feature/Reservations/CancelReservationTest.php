@@ -23,9 +23,20 @@ it('M1+M2: huỷ đặt bàn pending, ghi đúng lý do/ai/lúc nào', function 
     $ketQua = $this->action->handle(new CancelReservationData($dat->id, 'Khách đổi ý', $this->user->id));
 
     expect($ketQua->status)->toBe(ReservationStatus::Cancelled)
-        ->and($ketQua->note)->toBe('Khách đổi ý')
+        ->and($ketQua->status_reason)->toBe('Khách đổi ý')
         ->and($ketQua->status_changed_by_user_id)->toBe($this->user->id)
         ->and($ketQua->status_changed_at)->not->toBeNull();
+});
+
+it('huỷ KHÔNG làm mất ghi chú của khách', function () {
+    $dat = Reservation::factory()->create(['note' => 'Sinh nhật, cần chỗ để bánh']);
+
+    $ketQua = $this->action->handle(new CancelReservationData($dat->id, 'Khách đổi ý', $this->user->id));
+
+    // Trước 13/08 lý do huỷ ghi đè lên chính cột note — ghi chú của khách mất
+    // vĩnh viễn, không khôi phục được. Hai thứ giờ ở hai cột riêng.
+    expect($ketQua->note)->toBe('Sinh nhật, cần chỗ để bánh')
+        ->and($ketQua->status_reason)->toBe('Khách đổi ý');
 });
 
 it('M2: không ghi lý do thì bị chặn', function () {

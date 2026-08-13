@@ -2238,6 +2238,12 @@ bàn** — chỉ cảnh báo ở tầng ứng dụng (M.4), không chặn ở t�
 — cột này đặt ở phía `reservations`, **không** thêm cột nào vào `table_sessions`. `table_sessions`
 được bảo vệ bởi rất nhiều bất biến (T-series) và không cần biết gì về việc đặt bàn.
 
+## M.2b. Báo cáo "cọc còn treo" (thêm 13/08)
+
+`App\Domain\Reservations\Queries\GetUnhandledDeposits` liệt kê các đặt bàn `no_show` **hoặc `cancelled`** có phiếu cọc còn hiệu lực mà `deposit_status = 'unhandled'`. Đây là câu trả lời cho *"ba tháng sau giở sổ ra hỏi: cái cọc đó hoàn cho khách chưa, hay mình giữ?"*.
+
+Tính **cả `cancelled`** chứ không chỉ `no_show` (chốt 13/08): khách tự huỷ mà đã đặt cọc 200.000đ thì cũng là một khoản tiền thật đang treo y hệt. Bỏ sót nó thì báo cáo mất tác dụng đúng ở chỗ nó sinh ra để làm.
+
 ## M.3. Tiền cọc — dùng lại `payments`, KHÔNG tạo bảng tiền riêng
 
 `payments.table_session_id` trước đây `NOT NULL`. Cọc thường thu **lúc đặt bàn**, trước khi có
@@ -2266,13 +2272,15 @@ cọc đang giữ" nào trên báo cáo. Đúng, không sai — chỉ chưa đư
 | Mã | Bất biến | Chốt ở |
 |---|---|---|
 | M1 | `reservations.status` chỉ chuyển theo đúng sơ đồ: `pending`→{`confirmed`,`seated`,`no_show`,`cancelled`}; `confirmed`→{`seated`,`no_show`,`cancelled`}; `seated`/`no_show`/`cancelled` là trạng thái cuối, không đi đâu được nữa. | APP (`InvalidReservationTransitionException`) |
-| M2 | Chuyển sang `cancelled` bắt buộc có `note` (lý do) và `status_changed_by_user_id` — cùng tinh thần luật 13 CLAUDE.md ("huỷ = đổi trạng thái + ghi ai/lúc nào/vì sao"). `no_show` KHÔNG bắt buộc lý do — đó là một sự kiện quan sát được, không phải một quyết định cần giải trình. | DB (`ck_reservations_cancel_reason`) |
+| M2 | Chuyển sang `cancelled` **hoặc `no_show`** bắt buộc có `status_reason` (lý do), `status_changed_by_user_id` và `status_changed_at` — luật 13 CLAUDE.md ("huỷ = đổi trạng thái + ghi ai/lúc nào/vì sao"). **Sửa 13/08:** bản đầu chỉ canh `cancelled` và canh nhầm cột `note`; xem M9. | DB (`ck_reservations_status_reason`) |
 | M3 | Đặt bàn không khoá cứng `dining_tables` — hai đặt bàn trùng giờ (cách nhau dưới 120 phút), trùng bàn chỉ CẢNH BÁO (trả về danh sách ID trùng), không chặn. Chỉ tính các đặt bàn đang `pending`/`confirmed`/`seated`. | APP (`CreateReservation`) |
 | M4 | `SeatReservation` không tự mở `table_session` mới — phải có sẵn một lượt khách đang `open`, truyền vào. Không kiểm tra `dining_table_id` của đặt bàn có khớp bàn thật của lượt khách không (thu ngân có thể xếp khách vào bàn khác bàn đã đặt). | APP |
 | M5 | Một phiếu `payments` hoặc thuộc lượt khách (`table_session_id`), hoặc thuộc đặt bàn (`reservation_id`) — đúng một trong hai, không bao giờ cả hai hay không cái nào. | DB (`ck_payments_target`) |
 | M6 | Tiền cọc không tự động cộng vào `paid_amount` của lượt khách nào — xem M.3. | APP (do thiết kế, không cần chặn gì thêm) |
 | M7 | `occurred_at`/`paid_at` của một dòng cọc là thời điểm NGHIỆP VỤ do người gọi truyền vào, không phải `now()` bên trong Action — bài học bug F (Phase 3). | APP (`RecordReservationDeposit`) |
-| M8 | `no_show` và `cancelled` KHÔNG tự động giữ/hoàn cọc — quyết định có ý thức (chưa chốt chính sách tiền, xem `docs/viec-ton.md`). Thu ngân tự xử lý bằng `VoidPayment` nếu cần hoàn. | APP (cố ý không làm gì) |
+| M8 | `no_show` và `cancelled` KHÔNG tự động giữ/hoàn cọc — quyết định có ý thức. Thu ngân trả tiền bằng `VoidPayment`, rồi ĐÁNH DẤU lại bằng `MarkDepositHandled`. Hai việc cố ý không tự gọi nhau: nếu đánh dấu mà tự hoàn tiền luôn thì một cú bấm nhầm vừa mất dấu vết vừa mất tiền. | APP (cố ý không làm gì) |
+| M9 | Cọc của một đặt bàn `no_show`/`cancelled` luôn có một trong ba trạng thái `deposit_status`: `unhandled` / `refunded` / `kept`. Hệ thống **KHÔNG BAO GIỜ tự suy diễn** ra `refunded`/`kept` — chỉ người đánh dấu, vì chỉ người mới biết đã nói gì với khách. `unhandled` nghĩa là "chưa ai quyết", không phải "không có cọc". Đánh dấu rồi thì bắt buộc đủ ai (`deposit_handled_by_user_id`) / lúc nào (`deposit_handled_at`, lấy từ thời điểm nghiệp vụ theo M7) / vì sao (`deposit_handled_note`). Đã đánh dấu thì không đè lên được. | DB (`ck_reservations_deposit_handled`) + APP (`MarkDepositHandled`) |
+| M10 | `note` là ghi chú của KHÁCH ("bàn gần quạt", "sinh nhật"); `status_reason` là lý do đổi trạng thái. **Hai việc, hai cột.** Bản đầu (12/08) ghi đè lý do huỷ lên chính cột `note`, nên huỷ một cái là ghi chú của khách mất vĩnh viễn — sửa 13/08, migration `2026_08_13_000002` chép `note` sang `status_reason` cho các dòng `cancelled` cũ (bắt buộc kỹ thuật: MariaDB kiểm CHECK trên dòng đang có). | DB + APP |
 
 ## M.5. DDL
 
@@ -2290,11 +2298,18 @@ CREATE TABLE reservations (
     guest_count             INT UNSIGNED    NOT NULL,
     reserved_at             DATETIME        NOT NULL,
     status                  ENUM('pending','confirmed','seated','no_show','cancelled') NOT NULL DEFAULT 'pending',
-    note                    VARCHAR(255)    NULL,
+    note                    VARCHAR(255)    NULL COMMENT 'Ghi chú của KHÁCH — bàn gần quạt, có trẻ nhỏ... (M10)',
+    status_reason           VARCHAR(255)    NULL COMMENT 'Lý do huỷ / lý do khách không tới — KHÁC note (M10)',
 
     created_by_user_id      BIGINT UNSIGNED NOT NULL,
     status_changed_by_user_id BIGINT UNSIGNED NULL,
     status_changed_at       DATETIME        NULL,
+
+    -- Dấu vết tiền cọc (M9) — thêm 13/08. NGƯỜI đánh dấu, hệ thống không suy diễn.
+    deposit_status          ENUM('unhandled','refunded','kept') NOT NULL DEFAULT 'unhandled',
+    deposit_handled_by_user_id BIGINT UNSIGNED NULL,
+    deposit_handled_at      DATETIME        NULL,
+    deposit_handled_note    VARCHAR(255)    NULL COMMENT 'Vì sao xử lý như vậy',
 
     created_at              TIMESTAMP       NULL,
     updated_at              TIMESTAMP       NULL,
@@ -2303,18 +2318,28 @@ CREATE TABLE reservations (
     KEY idx_reservations_table_time (dining_table_id, reserved_at),
     KEY idx_reservations_status (status, reserved_at),
     KEY idx_reservations_customer (customer_id),
+    KEY idx_reservations_deposit (status, deposit_status),
 
     CONSTRAINT ck_reservations_guest_count CHECK (guest_count > 0),
-    CONSTRAINT ck_reservations_cancel_reason CHECK (
-        status <> 'cancelled'
-        OR (note IS NOT NULL AND status_changed_by_user_id IS NOT NULL AND status_changed_at IS NOT NULL)
+    CONSTRAINT ck_reservations_status_reason CHECK (
+        status NOT IN ('cancelled', 'no_show')
+        OR (status_reason IS NOT NULL
+            AND status_changed_by_user_id IS NOT NULL
+            AND status_changed_at IS NOT NULL)
+    ),
+    CONSTRAINT ck_reservations_deposit_handled CHECK (
+        deposit_status = 'unhandled'
+        OR (deposit_handled_by_user_id IS NOT NULL
+            AND deposit_handled_at IS NOT NULL
+            AND deposit_handled_note IS NOT NULL)
     ),
 
     CONSTRAINT fk_reservations_customer      FOREIGN KEY (customer_id)      REFERENCES customers (id),
     CONSTRAINT fk_reservations_table         FOREIGN KEY (dining_table_id)  REFERENCES dining_tables (id),
     CONSTRAINT fk_reservations_session       FOREIGN KEY (table_session_id) REFERENCES table_sessions (id),
     CONSTRAINT fk_reservations_created_by    FOREIGN KEY (created_by_user_id)      REFERENCES users (id),
-    CONSTRAINT fk_reservations_status_by     FOREIGN KEY (status_changed_by_user_id) REFERENCES users (id)
+    CONSTRAINT fk_reservations_status_by     FOREIGN KEY (status_changed_by_user_id) REFERENCES users (id),
+    CONSTRAINT fk_reservations_deposit_by    FOREIGN KEY (deposit_handled_by_user_id) REFERENCES users (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

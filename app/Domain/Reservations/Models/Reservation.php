@@ -8,6 +8,7 @@ use App\Domain\Billing\Models\Payment;
 use App\Domain\Loyalty\Models\Customer;
 use App\Domain\Ordering\Models\DiningTable;
 use App\Domain\Ordering\Models\TableSession;
+use App\Domain\Reservations\Enums\DepositStatus;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Staffing\Models\User;
 use Database\Factories\ReservationFactory;
@@ -40,9 +41,14 @@ final class Reservation extends Model
         'reserved_at',
         'status',
         'note',
+        'status_reason',
         'created_by_user_id',
         'status_changed_by_user_id',
         'status_changed_at',
+        'deposit_status',
+        'deposit_handled_by_user_id',
+        'deposit_handled_at',
+        'deposit_handled_note',
     ];
 
     protected function casts(): array
@@ -52,6 +58,8 @@ final class Reservation extends Model
             'guest_count' => 'integer',
             'reserved_at' => 'datetime',
             'status_changed_at' => 'datetime',
+            'deposit_status' => DepositStatus::class,
+            'deposit_handled_at' => 'datetime',
         ];
     }
 
@@ -83,6 +91,12 @@ final class Reservation extends Model
     public function statusChangedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'status_changed_by_user_id');
+    }
+
+    /** @return BelongsTo<User, $this> */
+    public function depositHandledBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'deposit_handled_by_user_id');
     }
 
     /** @return HasMany<Payment, $this> */

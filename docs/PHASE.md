@@ -5,7 +5,7 @@
 
 ```
 PHASE = 4
-BUOC_DANG_MO = 4A.3, 4B.0
+BUOC_DANG_MO = 4B.1
 ```
 
 # BẢN ĐỒ PHASE 4
@@ -22,7 +22,7 @@ Không tính vào các bước đang mở. Chi tiết chính sách chưa chốt 
 
 **Đổi số hiệu ngày 12/08/2026: trước đây gọi nhầm là 4A.2 (số đó thuộc về sổ cái điểm thưởng, xem trên) — đúng ra là 4A.3.** Một commit đã lỡ ghi "P4-4A.2" trong message (06c8502, chỉ sửa `CLAUDE.md` mục 11) — không amend lại, chỉ sửa số hiệu từ đây trở đi.
 
-Trạng thái: ĐANG REVIEW, CHƯA COMMIT — chờ chủ dự án duyệt riêng batch này (tách khỏi P4-4B.0)
+Trạng thái: **ĐÃ ĐÓNG (13/08/2026)** — commit `ee42321` (bảng, 6 Action, cọc dùng lại `payments`) + commit dấu vết cọc 13/08 (`MarkDepositHandled`, `GetUnhandledDeposits`, `status_reason`). Ba mục "dấu vết cọc" bên dưới đã làm đủ; 55 test nhóm Reservations xanh.
 
 ### Trong phạm vi
 - Bảng `reservations` (trạng thái pending/confirmed/seated/no_show/cancelled)
@@ -34,7 +34,7 @@ Trạng thái: ĐANG REVIEW, CHƯA COMMIT — chờ chủ dự án duyệt riên
 - Dời bàn cho đặt trước sau khi tạo
 - Z-report tách dòng tiền cọc
 
-### Chính sách cọc khi no_show — ĐÃ CHỐT 12/08
+### Chính sách cọc khi no_show — ĐÃ CHỐT 12/08, ĐÃ LÀM XONG 13/08
 Hệ thống **không tự quyết** giữ hay hoàn cọc; thu ngân thao tác tay bằng `VoidPayment`. Nhưng phải để lại DẤU VẾT, nếu không ba tháng sau không ai trả lời được "khách này no-show, cọc xử lý chưa?":
 - `MarkNoShow` **bắt buộc có lý do**, ghi vào audit log
 - `reservations` có trường ghi nhận cọc đã xử lý hay chưa (`đã hoàn` / `giữ lại` / `chưa xử lý`) — **do người thao tác đánh dấu, hệ thống KHÔNG tự suy diễn**
@@ -47,7 +47,7 @@ Hệ thống **không tự quyết** giữ hay hoàn cọc; thu ngân thao tác 
 
 ## P4-4B.0 — Lãi gộp không còn ngụy trang doanh thu thiếu giá vốn thành lãi 100%
 
-Trạng thái: ĐANG REVIEW, CHƯA COMMIT — gửi duyệt TRƯỚC P4-4A.3 (chạm số liệu tài chính, đang chặn P4-4B.1 dashboard)
+Trạng thái: **ĐÃ ĐÓNG (13/08/2026)** — commit `d2748a6` (`product_profit_daily`) + `ae8f928` (cặp cột cấp ngày ở `daily_summaries`, lệnh `report:backfill-gia-von --thu`, test trên fixture méo). Lệnh backfill **chưa chạy trên database nào** — chờ bản sao dữ liệu thật, xem mục dưới.
 
 ### Trong phạm vi
 - Sửa `product_profit_daily`: cột `revenue_uncosted_amount`, công thức `profit_amount` trả NULL khi toàn bộ doanh thu chưa có giá vốn
