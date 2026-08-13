@@ -14,6 +14,7 @@ use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Reporting\Models\DailySummary;
 use App\Domain\Reporting\Models\ProductSaleDaily;
+use App\Domain\Reporting\Queries\DoanhThuThieuGiaVonTheoNgay;
 use App\Domain\Staffing\Enums\ShiftStatus;
 use App\Domain\Staffing\Models\Shift;
 use Illuminate\Support\Carbon;
@@ -34,9 +35,25 @@ use Illuminate\Support\Facades\DB;
  * nó (table_sessions.opened_at, orders.sent_at, order_items.cancelled_at,
  * payments.paid_at, shifts.opened_at) — không đi vòng qua ca, nên ca kéo dài
  * qua nửa đêm không làm lệch ngày của việc xảy ra TRƯỚC nửa đêm.
+ *
+ * ── Hai cột "thiếu giá vốn" (Bước 4B.0) ───────────────────────────────────
+ * item_revenue_amount / item_revenue_uncosted_amount trả lời câu hỏi ở cấp
+ * NGÀY: bao nhiêu phần trăm doanh thu chưa biết giá vốn. Hai cột này CỐ Ý
+ * không đọc từ bảng lãi gộp theo món — cả hai cùng gọi
+ * DoanhThuThieuGiaVonTheoNgay, tính lại từ nguồn gốc, nên hai bảng báo cáo
+ * không bao giờ nói hai con số khác nhau về cùng một buổi tối, và không bảng
+ * tổng hợp nào phụ thuộc thứ tự chạy của bảng tổng hợp khác.
+ *
+ * Lưu ý khi đọc: item_revenue_amount KHÁC revenue_amount một cách bình thường
+ * — cột trên đo tiền theo dòng món đã gọi, cột dưới đo tiền đã thu vào két.
+ * Tỉ lệ thiếu giá vốn phải chia trong cặp item_*, không trộn hai thước.
  */
 final class SummarizeDailyReport
 {
+    public function __construct(
+        private readonly DoanhThuThieuGiaVonTheoNgay $soatThieuGiaVon,
+    ) {}
+
     public function handle(string $date): DailySummary
     {
         $ngay = Carbon::parse($date)->startOfDay();
@@ -91,11 +108,15 @@ final class SummarizeDailyReport
             ->selectRaw('COALESCE(SUM(CAST(counted_cash AS SIGNED) - CAST(expected_cash AS SIGNED)), 0) as chenh_lech')
             ->value('chenh_lech');
 
+        $soat = $this->soatThieuGiaVon->handle($ngay->toDateString());
+
         return [
             'revenue_amount' => $tienMat + $chuyenKhoan,
             'cash_amount' => $tienMat,
             'transfer_amount' => $chuyenKhoan,
             'discount_amount' => (int) (clone $luotKhach)->sum('discount_amount'),
+            'item_revenue_amount' => $soat->tongDoanhThu(),
+            'item_revenue_uncosted_amount' => $soat->tongDoanhThuThieuGiaVon(),
             'table_session_count' => (clone $luotKhach)->count(),
             'guest_count' => (int) (clone $luotKhach)->sum('guest_count'),
             'cancelled_item_count' => (int) (clone $monHuy)->count(),

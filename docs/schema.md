@@ -99,7 +99,7 @@ Tổng cộng **20 bảng**, chia 8 nhóm.
 
 | # | Bảng | Vai trò bằng ngôn ngữ quán |
 |---|---|---|
-| 19 | `daily_summaries` | **Sổ tổng hợp MỘT NGÀY.** Doanh thu, số lượt khách, số khách, tiền mặt, chuyển khoản, giảm giá, số/giá trị món huỷ, chênh lệch két — ghi bởi việc tổng hợp chạy lúc đóng ca. Màn hình chủ quán CHỈ đọc từ đây, không bao giờ đọc thẳng `orders`. |
+| 19 | `daily_summaries` | **Sổ tổng hợp MỘT NGÀY.** Doanh thu, số lượt khách, số khách, tiền mặt, chuyển khoản, giảm giá, số/giá trị món huỷ, chênh lệch két, và phần doanh thu chưa biết giá vốn (K19) — ghi bởi việc tổng hợp chạy lúc đóng ca. Màn hình chủ quán CHỈ đọc từ đây, không bao giờ đọc thẳng `orders`. |
 | 20 | `product_sales_daily` | **Sổ bán hàng theo món, theo NGÀY.** Số lượng và doanh thu từng biến thể món bán ra trong ngày — nguồn cho "Top món bán chạy" trên màn hình chủ quán. |
 
 ### Vì sao 15 bảng, vượt mục tiêu 12?
@@ -751,6 +751,17 @@ CREATE TABLE daily_summaries (
     transfer_amount        BIGINT UNSIGNED NOT NULL DEFAULT 0,
     discount_amount        BIGINT UNSIGNED NOT NULL DEFAULT 0,
 
+    -- Thêm Bước 4B.0 (K19). Cặp này trả lời "bao nhiêu % doanh thu chưa biết
+    -- giá vốn" ở cấp NGÀY. Phải đi THÀNH CẶP vì revenue_amount ở trên đo bằng
+    -- thước khác — tiền ĐÃ THU VÀO KÉT (payments), còn phần thiếu giá vốn đo
+    -- theo DÒNG MÓN ĐÃ GỌI. Hai thước lệch nhau một cách bình thường (khách ăn
+    -- tối nay trả tiền sau nửa đêm, bàn còn mở chưa thu, bill huỷ cả lượt), nên
+    -- chia chéo hai thước sẽ ra tỉ lệ SAI mà trông rất thật.
+    item_revenue_amount          BIGINT UNSIGNED NOT NULL DEFAULT 0
+                           COMMENT 'Doanh thu theo dòng món đã gọi, đã phân bổ giảm giá — MẪU SỐ',
+    item_revenue_uncosted_amount BIGINT UNSIGNED NOT NULL DEFAULT 0
+                           COMMENT 'Phần trong đó chưa xác định được giá vốn — TỬ SỐ (K19)',
+
     table_session_count    INT UNSIGNED    NOT NULL DEFAULT 0,
     guest_count            INT UNSIGNED    NOT NULL DEFAULT 0,
 
@@ -762,7 +773,8 @@ CREATE TABLE daily_summaries (
     created_at             TIMESTAMP       NULL,
     updated_at             TIMESTAMP       NULL,
     PRIMARY KEY (id),
-    UNIQUE KEY uq_daily_summaries_date (date)
+    UNIQUE KEY uq_daily_summaries_date (date),
+    CONSTRAINT ck_daily_summaries_uncosted CHECK (item_revenue_uncosted_amount <= item_revenue_amount)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 20. BÁN HÀNG THEO MÓN, THEO NGÀY (Phase 2 Bước 8)
@@ -2021,6 +2033,14 @@ Cách chúng hoạt động: khoá duy nhất `(ref_type, ref_id, ingredient_id)
 `qty_no_cost`/`qty_not_served` (K.7 bảng trên) chỉ đếm SỐ LƯỢNG — không tính được "% doanh thu thiếu giá vốn" vì giá các món khác nhau. `revenue_uncosted_amount` là phần TIỀN doanh thu tương ứng. `profit_amount` trước đây luôn `= revenue_amount - cost_amount`; khi `cost_amount = 0` vì "không xác định được" (không phải "không tốn gì"), con số này ngụy trang thành lãi 100%. Từ Bước 4B.0: NULL khi toàn bộ doanh thu ngày/món đó chưa có giá vốn; còn lại chỉ tính trên phần ĐÃ biết, phần chưa biết tách riêng ở `revenue_uncosted_amount`, không bao giờ trộn vào `profit_amount`. Không backfill tự động trong migration — chạy lại `php artisan report:summarize --tu=... --den=...` (lệnh đã có, luôn tính lại từ nguồn gốc) cho khoảng ngày cũ muốn sửa.
 
 Màn hình chủ quán (`GetOwnerProfitDashboard`, Bước 4B.1) hiện tự tính lại lãi gộp bằng SQL riêng, không đọc `profit_amount` — sửa K19 ở đây KHÔNG tự động sửa màn hình đó, xem `docs/viec-ton.md`.
+
+**K19 ở cấp NGÀY — cặp `daily_summaries.item_revenue_amount` / `item_revenue_uncosted_amount`** (thêm 13/08, cùng Bước 4B.0).
+
+Bảng `product_profit_daily` trả lời được câu hỏi theo TỪNG MÓN, nhưng câu chủ quán hỏi mỗi sáng là câu của cả buổi tối: "hôm qua bao nhiêu phần trăm doanh thu không biết giá vốn?". Trả lời cần một tử số và một mẫu số **đo cùng một thước** — và `revenue_amount` sẵn có KHÔNG dùng làm mẫu số được, vì nó đo tiền ĐÃ THU VÀO KÉT (`payments`) còn phần thiếu giá vốn đo theo DÒNG MÓN ĐÃ GỌI. Hai thước lệch nhau một cách hoàn toàn bình thường: khách ăn tối nay trả tiền sau nửa đêm, bàn còn mở chưa thu, bill bị huỷ cả lượt. Chia chéo hai thước ra một tỉ lệ **sai mà trông rất thật** — đúng loại lỗi K19 sinh ra để diệt. Vì vậy thêm **đủ cả cặp**, cùng đo theo dòng món, và ràng buộc cứng `ck_daily_summaries_uncosted` giữ tử số không bao giờ vượt mẫu số.
+
+Hai cột này **không đọc ngược từ `product_profit_daily`**: `SummarizeDailyReport` và `SummarizeProductProfit` cùng gọi `App\Domain\Reporting\Queries\DoanhThuThieuGiaVonTheoNgay`, tính lại từ nguồn gốc. Nhờ vậy hai bảng báo cáo không bao giờ nói hai con số khác nhau về cùng một buổi tối, và không bảng tổng hợp nào phụ thuộc thứ tự chạy của bảng kia.
+
+Dữ liệu lịch sử mang giá trị 0, nghĩa là **"chưa soát"** chứ không phải "đã soát và sạch", cho tới khi có người chạy `php artisan report:backfill-gia-von --tu=... --den=...` (có cờ `--thu` để chạy thử, in bảng so sánh trước/sau rồi quay lui sạch). Không backfill tự động trong migration.
 
 ---
 

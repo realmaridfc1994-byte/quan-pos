@@ -22,6 +22,8 @@ class DailySummaryFactory extends Factory
             'cash_amount' => 0,
             'transfer_amount' => 0,
             'discount_amount' => 0,
+            'item_revenue_amount' => 0,
+            'item_revenue_uncosted_amount' => 0,
             'table_session_count' => 0,
             'guest_count' => 0,
             'cancelled_item_count' => 0,

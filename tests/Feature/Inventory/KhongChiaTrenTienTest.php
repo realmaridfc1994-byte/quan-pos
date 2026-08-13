@@ -41,6 +41,12 @@ const COT_TIEN = [
     'change_amount',
     'revenue_amount',
     'profit_amount',
+    // Bước 4B.0 — ba cột tiền của nhóm "thiếu giá vốn". Phải liệt kê tay: mẫu
+    // \brevenue_amount\b KHÔNG khớp được item_revenue_amount vì gạch dưới cũng
+    // là ký tự chữ, nên ba cột này lọt lưới nếu chỉ dựa vào cột cũ.
+    'revenue_uncosted_amount',
+    'item_revenue_amount',
+    'item_revenue_uncosted_amount',
     'unit_price',
     'line_amount',
     'expected_cash_amount',
