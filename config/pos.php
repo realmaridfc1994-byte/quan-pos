@@ -54,4 +54,38 @@ return [
     */
 
     'moc_ngay_kiem_thieu_gia_von' => '2026-08-10',
+
+    /*
+    |--------------------------------------------------------------------------
+    | Khách quét mã QR trên bàn — Phase 4
+    |--------------------------------------------------------------------------
+    |
+    | Mã QR dán trên bàn chứa MÃ ĐỊNH DANH BÀN, là thứ CÔNG KHAI, không phải
+    | bí mật: nó chỉ nói "đây là bàn nào", không cấp quyền gì. Muốn gọi món,
+    | khách phải đổi nó lấy một token phiên ngắn hạn, và server chỉ cấp khi
+    | bàn đó ĐANG CÓ KHÁCH NGỒI.
+    |
+    | Vì sao không dán token cố định lên bàn: ai chụp ảnh mã QR một lần là gọi
+    | món được mãi mãi, từ nhà. Và muốn thu hồi thì phải đi bóc lại tem của cả
+    | 15 bàn.
+    |
+    | 3 giờ: dài bằng một bữa nhậu. Ngắn hơn thì khách ngồi lâu phải quét lại
+    | giữa chừng. Dài hơn thì một cái điện thoại bỏ quên trên bàn còn gọi món
+    | được sau khi khách về — dù bàn đóng là token chết ngay, nên rủi ro nhỏ.
+    | Hạn giờ này ĐỘC LẬP với việc bàn đóng: hết giờ là chết dù bàn còn mở,
+    | bàn đóng là chết dù chưa hết giờ.
+    */
+
+    'khach_tu_goi' => [
+        'token_song_bao_lau_phut' => 180,
+
+        /*
+        | Địa chỉ máy quán trong mạng nội bộ, dùng để dựng đường link in vào
+        | mã QR: <base_url>/g/<mã bàn>.
+        |
+        | CẢNH BÁO: đổi địa chỉ này là PHẢI IN LẠI TOÀN BỘ TEM QR của mọi bàn.
+        | Mặc định lấy theo APP_URL để không phải sửa .env.
+        */
+        'duong_dan_goc' => env('POS_QR_BASE_URL', env('APP_URL', 'http://localhost')),
+    ],
 ];

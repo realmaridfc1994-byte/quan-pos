@@ -13,6 +13,7 @@ use App\Domain\Catalog\Models\ProductVariant;
 use App\Domain\Ordering\Models\DiningTable;
 use App\Domain\Staffing\Enums\UserRole;
 use App\Domain\Staffing\Models\User;
+use App\Support\MaBanCongKhai;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
@@ -79,6 +80,8 @@ class DatabaseSeeder extends Seeder
         }
 
         foreach ($ban as $b) {
+            $dangCo = DiningTable::query()->where('code', $b['code'])->first();
+
             DiningTable::query()->updateOrCreate(
                 ['code' => $b['code']],
                 [
@@ -87,6 +90,10 @@ class DatabaseSeeder extends Seeder
                     'seats' => $b['seats'],
                     'sort_order' => $b['sort_order'],
                     'is_active' => true,
+                    // Mã QR sinh ĐÚNG MỘT LẦN lúc tạo bàn. Chạy lại seeder
+                    // KHÔNG được đổi mã — đổi là toàn bộ tem QR đã in và dán
+                    // lên bàn thành vô dụng, phải in lại cả quán.
+                    'public_code' => $dangCo?->public_code ?? MaBanCongKhai::sinh(),
                 ]
             );
         }

@@ -5,7 +5,7 @@
 
 ```
 PHASE = 4
-BUOC_DANG_MO = 4B.1
+BUOC_DANG_MO = 4B.2
 ```
 
 # BẢN ĐỒ PHASE 4

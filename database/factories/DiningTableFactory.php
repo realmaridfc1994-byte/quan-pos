@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Database\Factories;
 
 use App\Domain\Ordering\Models\DiningTable;
+use App\Support\MaBanCongKhai;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -25,6 +26,11 @@ class DiningTableFactory extends Factory
     {
         return [
             'code' => 'T'.str_pad((string) ++self::$sequence, 4, '0', STR_PAD_LEFT),
+            // NGOẠI LỆ của luật 23 giống cột uuid: không gian giá trị 22 ký tự
+            // chữ-số lớn tới mức trùng nhau không phải rủi ro thực tế, và đổi
+            // sang bộ đếm sẽ phá đúng tính chất "không đoán được" mà cột này
+            // sinh ra để có.
+            'public_code' => MaBanCongKhai::sinh(),
             'name' => fake()->word(),
             'area' => 'Trong nhà',
             'seats' => 4,

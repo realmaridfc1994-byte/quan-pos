@@ -19,6 +19,12 @@ it('mọi route POST/PATCH dưới /api/v1 (trừ danh sách miễn trừ) đề
         // Tự chống trùng theo op_uuid của TỪNG thao tác bên trong gói, không
         // dùng header Idempotency-Key — xem routes/api.php và SyncBatch.
         'api/v1/sync/batch',
+        // Khách quét mã QR đổi lấy token: KHÔNG ghi một dòng dữ liệu nào, chỉ
+        // đọc bàn rồi dựng chuỗi token trong bộ nhớ. Quét hai lần ra hai token
+        // đều hợp lệ, không hại gì. Bắt khách gửi kèm header Idempotency-Key
+        // thì mọi máy khách quét QR đều phải biết luật riêng của quán — đổi
+        // lấy đúng con số không.
+        'api/v1/guest/sessions',
     ];
 
     $thieuMiddleware = [];

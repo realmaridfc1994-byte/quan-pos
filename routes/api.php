@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BillController;
 use App\Http\Controllers\Api\CashMovementController;
 use App\Http\Controllers\Api\FloorPlanController;
+use App\Http\Controllers\Api\GuestSessionController;
 use App\Http\Controllers\Api\KdsController;
 use App\Http\Controllers\Api\MenuController;
 use App\Http\Controllers\Api\OrderController;
@@ -21,6 +22,26 @@ use App\Http\Controllers\Api\VietQrController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
+    /*
+     * KÊNH CÔNG KHAI của khách quét mã QR trên bàn — Phase 4.
+     *
+     * KHÔNG có auth:sanctum: khách bước vào quán không có tài khoản nào. Chốt
+     * chặn nằm ở chỗ khác — server chỉ cấp token khi bàn ĐANG CÓ KHÁCH NGỒI
+     * THẬT, và token chết ngay khi thu ngân đóng bàn.
+     *
+     * Hai bộ đếm chặn gọi dồn dập khai ở AppServiceProvider:
+     *   guest-doi-ma  — 10 lần/phút theo máy khách, chặn máy dò mã bàn
+     *   guest-api     — 60 lần/phút theo TỪNG TOKEN
+     */
+    Route::prefix('guest')->group(function (): void {
+        Route::post('sessions', [GuestSessionController::class, 'store'])
+            ->middleware('throttle:guest-doi-ma');
+
+        Route::middleware(['guest-session', 'throttle:guest-api'])->group(function (): void {
+            Route::get('session', [GuestSessionController::class, 'show']);
+        });
+    });
+
     Route::prefix('auth')->group(function (): void {
         Route::post('login', [AuthController::class, 'login']);
 

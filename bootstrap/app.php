@@ -2,11 +2,14 @@
 
 use App\Exceptions\ApprovalPinRequiredException;
 use App\Exceptions\DomainException;
+use App\Exceptions\GuestTableNotOpenException;
+use App\Exceptions\GuestTokenException;
 use App\Exceptions\IdempotencyConflictException;
 use App\Exceptions\IdempotencyKeyRequiredException;
 use App\Exceptions\IdempotencyPayloadMismatchException;
 use App\Exceptions\InvalidReservationTransitionException;
 use App\Exceptions\SyncBatchLockedException;
+use App\Http\Middleware\EnsureGuestSessionToken;
 use App\Http\Middleware\EnsureIdempotencyKey;
 use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -31,6 +34,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'active' => EnsureUserIsActive::class,
             'idempotent' => EnsureIdempotencyKey::class,
+            'guest-session' => EnsureGuestSessionToken::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -48,6 +52,12 @@ return Application::configure(basePath: dirname(__DIR__))
                 $e instanceof IdempotencyConflictException => [409, 'IDEMPOTENCY_CONFLICT', $e->getMessage(), null],
                 $e instanceof IdempotencyPayloadMismatchException => [422, 'IDEMPOTENCY_PAYLOAD_MISMATCH', $e->getMessage(), null],
                 $e instanceof InvalidReservationTransitionException => [422, 'INVALID_RESERVATION_TRANSITION', $e->getMessage(), null],
+
+                // Khách quét mã QR (Phase 4). Ba mã token dùng 401 để client
+                // biết phải quét lại; TABLE_NOT_OPEN dùng 409 vì token không
+                // sai gì cả — chỉ là bàn chưa có ai ngồi.
+                $e instanceof GuestTokenException => [401, $e->errorCode, $e->getMessage(), null],
+                $e instanceof GuestTableNotOpenException => [409, 'TABLE_NOT_OPEN', $e->getMessage(), null],
                 $e instanceof AuthenticationException => [401, 'UNAUTHENTICATED', 'Chưa đăng nhập hoặc phiên đã hết hạn.', null],
                 $e instanceof AuthorizationException => [403, 'FORBIDDEN', 'Bạn không có quyền thực hiện thao tác này.', null],
                 $e instanceof ThrottleRequestsException => [429, 'TOO_MANY_ATTEMPTS', 'Thử sai quá nhiều lần. Vui lòng đợi ít phút rồi thử lại.', null],

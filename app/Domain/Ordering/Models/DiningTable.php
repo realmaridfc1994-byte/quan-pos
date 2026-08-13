@@ -21,6 +21,7 @@ final class DiningTable extends Model
 
     protected $fillable = [
         'code',
+        'public_code',
         'name',
         'area',
         'seats',

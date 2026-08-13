@@ -225,6 +225,14 @@ CREATE TABLE cash_movements (
 CREATE TABLE dining_tables (
     id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     code                VARCHAR(20)     NOT NULL COMMENT 'Mã bàn ngắn in trên tem: B01, VIP1',
+
+    -- Thêm Phase 4 (khách quét QR tự gọi món). MÃ CÔNG KHAI, KHÔNG PHẢI BÍ
+    -- MẬT: nó chỉ nói "đây là bàn nào", không cấp quyền gì. `code` ở trên
+    -- không dùng làm mã QR được vì đoán được ngay từ bàn thứ nhất.
+    -- 22 ký tự chữ-số ngẫu nhiên (~131 bit) — xem App\Support\MaBanCongKhai.
+    public_code         CHAR(22) CHARACTER SET ascii COLLATE ascii_bin NOT NULL
+                        COMMENT 'Mã định danh bàn in trong mã QR — công khai',
+
     name                VARCHAR(50)     NOT NULL COMMENT 'Tên hiển thị: Bàn 1, Bàn sân',
     area                VARCHAR(50)     NULL     COMMENT 'Khu vực: Trong nhà, Sân, Lầu 1',
     seats               TINYINT UNSIGNED NOT NULL DEFAULT 4 COMMENT 'Số ghế, chỉ để gợi ý xếp bàn',
@@ -234,6 +242,7 @@ CREATE TABLE dining_tables (
     updated_at          TIMESTAMP       NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uq_dining_tables_code (code),
+    UNIQUE KEY uq_dining_tables_public_code (public_code),
     KEY idx_dining_tables_layout (is_active, area, sort_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -2380,3 +2389,53 @@ ALTER TABLE payments
 - [x] Cập nhật `CLAUDE.md` mục 11 — commit riêng, đã làm trước phần này
 - [x] Viết bất biến M1–M8 vào đây trước
 - [x] `docs/viec-ton.md`: ghi các việc ngoài phạm vi (Z-report chưa tách dòng cọc, dời bàn cho đặt trước chưa có Action, cửa sổ cảnh báo trùng giờ 120 phút là số tạm)
+---
+
+# PHẦN N — KHÁCH QUÉT MÃ QR TỰ GỌI MÓN (Phase 4, lượt 1: chỉ cơ chế token)
+
+**Không có bảng mới.** Chỉ thêm một cột vào `dining_tables` (xem PHẦN 3, bảng 4) và một cơ chế token không lưu ở đâu cả.
+
+## N.1. Sửa thiết kế so với bản đồ gốc — vì sao
+
+Bản đồ gốc ghi `dining_tables.qr_token` là một token **tĩnh** dán lên bàn. Đó là lỗ hổng, vì hai lý do:
+
+1. Ai chụp ảnh mã QR một lần là gọi món được **mãi mãi, từ nhà**.
+2. Muốn thu hồi thì phải đi **bóc lại tem của cả 15 bàn** rồi in lại.
+
+Thiết kế đang chạy tách làm hai thứ khác hẳn nhau:
+
+| | Mã QR dán trên bàn | Token phiên |
+|---|---|---|
+| Là gì | Mã ĐỊNH DANH bàn | Chìa khoá tạm |
+| Bí mật? | **Không** — ai chụp cũng được | Có |
+| Cấp quyền gì? | Không gì cả | Gọi món (lượt 2) |
+| Sống bao lâu | Vĩnh viễn | 3 tiếng, hoặc tới khi bàn đóng |
+
+Chốt chặn thật **không nằm ở việc giấu mã QR** mà nằm ở chỗ: đổi mã lấy token chỉ được khi bàn **đang có một lượt khách mở** — tức có người thật đã ngồi xuống và nhân viên đã mở bàn. Quán đóng cửa thì không bàn nào mở, không mã QR nào đổi được gì.
+
+## N.2. Bất biến
+
+| Mã | Bất biến | Chốt ở |
+|---|---|---|
+| N1 | `dining_tables.public_code` là 22 ký tự chữ-số ngẫu nhiên, KHÔNG suy ra được từ `id` tuần tự hay từ `code`. Sinh ở đúng một chỗ: `App\Support\MaBanCongKhai::sinh()`. | DB (`uq_dining_tables_public_code`) + APP |
+| N2 | Chỉ cấp token khi bàn có lượt khách trạng thái **`open`**. `billing` (đã in tạm tính) KHÔNG cấp — khách đòi tính tiền rồi, gọi thêm lúc đó dễ thành cãi nhau về con số trên tờ giấy đã in. | APP (`IssueGuestSessionToken`) |
+| N3 | Bàn không tồn tại / đã dẹp / chưa có khách đều trả **cùng một câu** và cùng mã lỗi `TABLE_NOT_OPEN`. Phân biệt ra là chỉ đường cho kẻ dò mã bàn. | APP |
+| N4 | Token **không lưu ở database**. Nội dung nằm trong chính chuỗi token, mã hoá bằng `APP_KEY`. Đường đổi mã là đường không cần đăng nhập — cho nó ghi database là mở cửa cho việc bơm rác. Đánh đổi đã cân nhắc: không thu hồi được lẻ một token. | APP (`GuestSessionToken`) |
+| N5 | Token chết theo **hai đường độc lập**: hết 3 tiếng (kiểm trong token), hoặc lượt khách thôi `open` / bàn bị nhả khỏi lượt khách (đọc lại database MỖI lần gọi, không cache). | APP (`EnsureGuestSessionToken`) |
+| N6 | `table_session_id` KHÔNG BAO GIỜ ra client. Thứ duy nhất client cầm được để đối chiếu là `ma_doi_chieu` — 12 ký tự đầu của dấu vân tay token, không xác thực bằng nó và không suy ngược ra id nào. | APP |
+| N7 | Kênh công khai chỉ trả về những trường trong **DANH SÁCH TRẮNG** của `GuestSessionResource`. Không danh sách đen — danh sách đen chỉ chặn được cái người viết nhớ ra, cột mới thêm ba tháng sau sẽ lặng lẽ lọt ra. | APP + `tests/Feature/Guest/DanhSachTrangTest.php` |
+| N8 | Token đi trong header `X-Guest-Token`, KHÔNG dùng `Authorization: Bearer` (chỗ đó là của token nhân viên). Hai loại quyền khác hẳn nhau thì để hai cửa khác nhau. | APP |
+| N9 | **KHÔNG BAO GIỜ có đường thanh toán trên kênh này** — quyết định kiến trúc đã chốt, bề mặt tấn công quá lớn. Tiền chỉ đi qua tay thu ngân. | Quyết định thiết kế |
+
+## N.3. Chặn gọi dồn dập
+
+| Bộ đếm | Mức | Đếm theo |
+|---|---|---|
+| `guest-doi-ma` | 10 lần/phút | Máy khách (chưa có token nên không đếm cách khác được) |
+| `guest-api` | 60 lần/phút | **Từng token** — không đếm theo máy khách, vì cả quán dùng chung wifi thì bốn người cùng bàn bấm nhanh sẽ chặn oan bàn bên cạnh |
+
+## N.4. Chưa làm ở lượt này
+
+- Đường gọi món (lượt 2)
+- Thanh toán qua kênh này — **sẽ không bao giờ làm**, xem N9
+- Sinh ảnh mã QR / in tem (cần chốt địa chỉ máy quán trong mạng nội bộ trước; đổi địa chỉ là phải in lại tem của mọi bàn)
