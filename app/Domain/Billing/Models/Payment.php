@@ -7,6 +7,7 @@ namespace App\Domain\Billing\Models;
 use App\Domain\Billing\Enums\PaymentMethod;
 use App\Domain\Billing\Enums\PaymentStatus;
 use App\Domain\Ordering\Models\TableSession;
+use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
 use Database\Factories\PaymentFactory;
@@ -29,6 +30,7 @@ final class Payment extends Model
     protected $fillable = [
         'uuid',
         'table_session_id',
+        'reservation_id',
         'shift_id',
         'method',
         'amount',
@@ -60,6 +62,16 @@ final class Payment extends Model
     public function tableSession(): BelongsTo
     {
         return $this->belongsTo(TableSession::class);
+    }
+
+    /**
+     * Cọc đặt bàn — chỉ set khi table_session_id là null (ck_payments_target, docs/schema.md M5).
+     *
+     * @return BelongsTo<Reservation, $this>
+     */
+    public function reservation(): BelongsTo
+    {
+        return $this->belongsTo(Reservation::class);
     }
 
     /** @return BelongsTo<Shift, $this> */

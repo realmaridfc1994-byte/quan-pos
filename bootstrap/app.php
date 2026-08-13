@@ -5,6 +5,7 @@ use App\Exceptions\DomainException;
 use App\Exceptions\IdempotencyConflictException;
 use App\Exceptions\IdempotencyKeyRequiredException;
 use App\Exceptions\IdempotencyPayloadMismatchException;
+use App\Exceptions\InvalidReservationTransitionException;
 use App\Exceptions\SyncBatchLockedException;
 use App\Http\Middleware\EnsureIdempotencyKey;
 use App\Http\Middleware\EnsureUserIsActive;
@@ -46,6 +47,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 $e instanceof IdempotencyKeyRequiredException => [400, 'IDEMPOTENCY_KEY_REQUIRED', $e->getMessage(), null],
                 $e instanceof IdempotencyConflictException => [409, 'IDEMPOTENCY_CONFLICT', $e->getMessage(), null],
                 $e instanceof IdempotencyPayloadMismatchException => [422, 'IDEMPOTENCY_PAYLOAD_MISMATCH', $e->getMessage(), null],
+                $e instanceof InvalidReservationTransitionException => [422, 'INVALID_RESERVATION_TRANSITION', $e->getMessage(), null],
                 $e instanceof AuthenticationException => [401, 'UNAUTHENTICATED', 'Chưa đăng nhập hoặc phiên đã hết hạn.', null],
                 $e instanceof AuthorizationException => [403, 'FORBIDDEN', 'Bạn không có quyền thực hiện thao tác này.', null],
                 $e instanceof ThrottleRequestsException => [429, 'TOO_MANY_ATTEMPTS', 'Thử sai quá nhiều lần. Vui lòng đợi ít phút rồi thử lại.', null],

@@ -8,6 +8,7 @@ use App\Domain\Billing\Enums\PaymentMethod;
 use App\Domain\Billing\Enums\PaymentStatus;
 use App\Domain\Billing\Models\Payment;
 use App\Domain\Ordering\Models\TableSession;
+use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -25,6 +26,7 @@ class PaymentFactory extends Factory
         return [
             'uuid' => (string) Str::uuid(),
             'table_session_id' => TableSession::factory(),
+            'reservation_id' => null,
             'shift_id' => Shift::factory(),
             'method' => PaymentMethod::Cash,
             'amount' => fake()->numberBetween(50000, 500000),
@@ -71,6 +73,15 @@ class PaymentFactory extends Factory
             'voided_at' => null,
             'voided_by_user_id' => null,
             'void_reason' => null,
+        ]);
+    }
+
+    /** Cọc đặt bàn (M3, docs/schema.md PHẦN M.3) — table_session_id null, reservation_id set. */
+    public function deposit(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'table_session_id' => null,
+            'reservation_id' => Reservation::factory(),
         ]);
     }
 

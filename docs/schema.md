@@ -2212,3 +2212,146 @@ CREATE TABLE customers (
     KEY idx_customers_active (is_active, name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
+
+---
+
+# PHẦN M — ĐẶT BÀN (Phase 4 Bước P4-4A.3 — đổi số 12/08, xem docs/PHASE.md)
+
+Một bảng mới (`reservations`) + một thay đổi trên bảng đã có (`payments`, cho tiền cọc).
+
+## M.1. Bảng và vai trò
+
+| # | Bảng | Vai trò bằng ngôn ngữ quán |
+|---|---|---|
+| 22 | `reservations` | **Sổ đặt bàn trước.** Khách gọi điện/tới quán đặt trước — có thể chưa có hồ sơ khách quen, có thể chưa biết xếp bàn nào. Theo dõi từ lúc đặt (`pending`) tới lúc khách ngồi ăn thật (`seated`) hoặc không tới (`no_show`) hoặc tự huỷ (`cancelled`). |
+
+**Không có `branch_id`** — cùng lý do đã chốt ở `customers` (một quán, không multi-branch, xem `docs/viec-ton.md`).
+
+## M.2. Quan hệ với các bảng đã có — KHÔNG khoá cứng bàn
+
+`reservations.dining_table_id` chỉ là **gợi ý**, không phải giữ chỗ độc quyền — quán vẫn bán được
+cho khách vãng lai ngồi đúng bàn đó bất cứ lúc nào (đúng chủ ý nghiệp vụ quán nhậu VN, không phải
+thiếu sót). Vì vậy **không có ràng buộc UNIQUE hay CHECK nào chặn hai đặt bàn trùng giờ trùng
+bàn** — chỉ cảnh báo ở tầng ứng dụng (M.4), không chặn ở tầng dữ liệu.
+
+`SeatReservation` (Action, xem M.5) ghi lại đã nối vào lượt khách nào qua `reservations.table_session_id`
+— cột này đặt ở phía `reservations`, **không** thêm cột nào vào `table_sessions`. `table_sessions`
+được bảo vệ bởi rất nhiều bất biến (T-series) và không cần biết gì về việc đặt bàn.
+
+## M.3. Tiền cọc — dùng lại `payments`, KHÔNG tạo bảng tiền riêng
+
+`payments.table_session_id` trước đây `NOT NULL`. Cọc thường thu **lúc đặt bàn**, trước khi có
+`table_session` nào — nên từ Bước này:
+
+- `payments.table_session_id` đổi thành **NULLABLE**.
+- Thêm cột `payments.reservation_id` (NULLABLE, FK → `reservations.id`).
+- Thêm ràng buộc **CHECK ĐÚNG MỘT trong hai khác NULL** (`ck_payments_target`) — một phiếu thu
+  hoặc thuộc về một lượt khách (bán hàng bình thường), hoặc thuộc về một đặt bàn (cọc giữ chỗ),
+  không bao giờ cả hai, không bao giờ không cái nào.
+
+**Cọc KHÔNG cộng vào `table_sessions.paid_amount` của bất kỳ bàn nào** — bất biến T5
+("`paid_amount` = tổng các phiếu thu của lượt khách đó") không đổi nghĩa, chỉ tự động đúng vì
+điều kiện `WHERE table_session_id = X` không bao giờ khớp một dòng cọc (`table_session_id IS NULL`
+ở dòng cọc). Khi khách tới ăn thật, hoá đơn tính và thu tiền hoàn toàn độc lập với cọc đã thu —
+khách vẫn trả đủ 100% hoá đơn; giữ/hoàn cọc là việc riêng, thu ngân tự làm bằng `VoidPayment` sẵn
+có nếu cần (M.6, ngoài phạm vi Action tự động ở bước này).
+
+**Hệ quả ngoài phạm vi cố ý không xử lý ở đây** (ghi vào `docs/viec-ton.md`): báo cáo đối soát ca
+(`CloseShift`/Z-report) hiện cộng dồn theo `shift_id` không phân biệt cọc hay doanh thu bán hàng —
+một dòng cọc tiền mặt vẫn nằm trong tiền mặt kỳ vọng cuối ca, nhưng không có dòng tách riêng "tiền
+cọc đang giữ" nào trên báo cáo. Đúng, không sai — chỉ chưa được TRÌNH BÀY tách bạch.
+
+## M.4. Bất biến
+
+| Mã | Bất biến | Chốt ở |
+|---|---|---|
+| M1 | `reservations.status` chỉ chuyển theo đúng sơ đồ: `pending`→{`confirmed`,`seated`,`no_show`,`cancelled`}; `confirmed`→{`seated`,`no_show`,`cancelled`}; `seated`/`no_show`/`cancelled` là trạng thái cuối, không đi đâu được nữa. | APP (`InvalidReservationTransitionException`) |
+| M2 | Chuyển sang `cancelled` bắt buộc có `note` (lý do) và `status_changed_by_user_id` — cùng tinh thần luật 13 CLAUDE.md ("huỷ = đổi trạng thái + ghi ai/lúc nào/vì sao"). `no_show` KHÔNG bắt buộc lý do — đó là một sự kiện quan sát được, không phải một quyết định cần giải trình. | DB (`ck_reservations_cancel_reason`) |
+| M3 | Đặt bàn không khoá cứng `dining_tables` — hai đặt bàn trùng giờ (cách nhau dưới 120 phút), trùng bàn chỉ CẢNH BÁO (trả về danh sách ID trùng), không chặn. Chỉ tính các đặt bàn đang `pending`/`confirmed`/`seated`. | APP (`CreateReservation`) |
+| M4 | `SeatReservation` không tự mở `table_session` mới — phải có sẵn một lượt khách đang `open`, truyền vào. Không kiểm tra `dining_table_id` của đặt bàn có khớp bàn thật của lượt khách không (thu ngân có thể xếp khách vào bàn khác bàn đã đặt). | APP |
+| M5 | Một phiếu `payments` hoặc thuộc lượt khách (`table_session_id`), hoặc thuộc đặt bàn (`reservation_id`) — đúng một trong hai, không bao giờ cả hai hay không cái nào. | DB (`ck_payments_target`) |
+| M6 | Tiền cọc không tự động cộng vào `paid_amount` của lượt khách nào — xem M.3. | APP (do thiết kế, không cần chặn gì thêm) |
+| M7 | `occurred_at`/`paid_at` của một dòng cọc là thời điểm NGHIỆP VỤ do người gọi truyền vào, không phải `now()` bên trong Action — bài học bug F (Phase 3). | APP (`RecordReservationDeposit`) |
+| M8 | `no_show` và `cancelled` KHÔNG tự động giữ/hoàn cọc — quyết định có ý thức (chưa chốt chính sách tiền, xem `docs/viec-ton.md`). Thu ngân tự xử lý bằng `VoidPayment` nếu cần hoàn. | APP (cố ý không làm gì) |
+
+## M.5. DDL
+
+```sql
+-- ═══════════════════════════════════════════════════════════════
+-- 22. ĐẶT BÀN
+-- ═══════════════════════════════════════════════════════════════
+CREATE TABLE reservations (
+    id                      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+
+    customer_id             BIGINT UNSIGNED NULL COMMENT 'Khách vãng lai đặt bàn không cần hồ sơ',
+    dining_table_id         BIGINT UNSIGNED NULL COMMENT 'Gợi ý bàn — KHÔNG giữ chỗ độc quyền (M3)',
+    table_session_id        BIGINT UNSIGNED NULL COMMENT 'Gắn sau khi SeatReservation nối vào lượt khách đang mở (M4)',
+
+    guest_count             INT UNSIGNED    NOT NULL,
+    reserved_at             DATETIME        NOT NULL,
+    status                  ENUM('pending','confirmed','seated','no_show','cancelled') NOT NULL DEFAULT 'pending',
+    note                    VARCHAR(255)    NULL,
+
+    created_by_user_id      BIGINT UNSIGNED NOT NULL,
+    status_changed_by_user_id BIGINT UNSIGNED NULL,
+    status_changed_at       DATETIME        NULL,
+
+    created_at              TIMESTAMP       NULL,
+    updated_at              TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+    KEY idx_reservations_table_time (dining_table_id, reserved_at),
+    KEY idx_reservations_status (status, reserved_at),
+    KEY idx_reservations_customer (customer_id),
+
+    CONSTRAINT ck_reservations_guest_count CHECK (guest_count > 0),
+    CONSTRAINT ck_reservations_cancel_reason CHECK (
+        status <> 'cancelled'
+        OR (note IS NOT NULL AND status_changed_by_user_id IS NOT NULL AND status_changed_at IS NOT NULL)
+    ),
+
+    CONSTRAINT fk_reservations_customer      FOREIGN KEY (customer_id)      REFERENCES customers (id),
+    CONSTRAINT fk_reservations_table         FOREIGN KEY (dining_table_id)  REFERENCES dining_tables (id),
+    CONSTRAINT fk_reservations_session       FOREIGN KEY (table_session_id) REFERENCES table_sessions (id),
+    CONSTRAINT fk_reservations_created_by    FOREIGN KEY (created_by_user_id)      REFERENCES users (id),
+    CONSTRAINT fk_reservations_status_by     FOREIGN KEY (status_changed_by_user_id) REFERENCES users (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- SỬA BẢNG 15 (payments) — cho phép cọc đặt bàn (M.3)
+-- ═══════════════════════════════════════════════════════════════
+ALTER TABLE payments
+    MODIFY COLUMN table_session_id BIGINT UNSIGNED NULL,
+    ADD COLUMN reservation_id BIGINT UNSIGNED NULL AFTER table_session_id,
+    ADD CONSTRAINT fk_payments_reservation FOREIGN KEY (reservation_id) REFERENCES reservations (id),
+    ADD KEY idx_payments_reservation (reservation_id, status);
+
+ALTER TABLE payments
+    ADD CONSTRAINT ck_payments_target CHECK (
+        (table_session_id IS NOT NULL AND reservation_id IS NULL)
+     OR (table_session_id IS NULL     AND reservation_id IS NOT NULL)
+    );
+```
+
+## M.6. Chiến lược khoá
+
+Đã khai báo ở `CLAUDE.md` luật 11 (commit riêng, đứng trước code này):
+
+```
+... → Payment → TableSession → Reservation → Order → OrderItem → Shift → ...
+```
+
+- `SeatReservation`: khoá `TableSession` (đọc, xác nhận còn `open`) rồi khoá `Reservation` — đúng
+  thứ tự trong chuỗi.
+- `RecordReservationDeposit`: khoá `Reservation` (xác nhận trạng thái còn `pending`/`confirmed`)
+  rồi khoá `Shift` (xác nhận ca đang mở, giống hệt `RecordPayment`) — đúng thứ tự trong chuỗi.
+- `ConfirmReservation`/`MarkNoShow`/`CancelReservation`: chỉ khoá đúng một dòng `Reservation`.
+- Không Action nào của bước này khoá `Order`/`OrderItem`/`DiningTable` — vị trí `Reservation` so
+  với `Order`/`OrderItem` trong chuỗi không quan trọng, miễn nằm giữa `TableSession` và `Shift`.
+
+## M.7. Việc phải làm trước khi viết migration đầu tiên
+
+- [x] Cập nhật `CLAUDE.md` mục 11 — commit riêng, đã làm trước phần này
+- [x] Viết bất biến M1–M8 vào đây trước
+- [x] `docs/viec-ton.md`: ghi các việc ngoài phạm vi (Z-report chưa tách dòng cọc, dời bàn cho đặt trước chưa có Action, cửa sổ cảnh báo trùng giờ 120 phút là số tạm)

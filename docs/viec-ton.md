@@ -134,6 +134,14 @@ Kèm theo khi làm lại: báo cáo công nợ điểm đang lưu hành.
 
 ---
 
+## Đặt bàn (P4-4A.3 — đổi số 12/08, trước đây gọi nhầm 4A.2) — ba việc ngoài phạm vi
+
+[Bước sau] Z-report/`CloseShift` chưa tách riêng dòng "tiền cọc đặt bàn" khỏi doanh thu bán hàng — một khoản cọc tiền mặt vẫn nằm chung trong tiền mặt kỳ vọng cuối ca (đúng, vì tiền có thật trong két), nhưng báo cáo hiện không có dòng nào ghi rõ "trong đó bao nhiêu là cọc đang giữ, chưa phải doanh thu". Xem docs/schema.md PHẦN M.3 — 12/08
+[Bước sau] Không có Action nào đổi `dining_table_id` của một đặt bàn sau khi tạo (dời bàn cho khách đã đặt trước sang bàn khác) — `CreateReservation` chỉ nhận bàn lúc tạo. Cần khi có yêu cầu rõ — 12/08
+[Chờ chủ dự án quyết] Cửa sổ "trùng giờ" dùng để cảnh báo hai đặt bàn cùng bàn (`CreateReservation::TRUNG_GIO_PHUT = 120`) là số tạm tự chọn (thời lượng ăn trung bình), chưa hỏi chủ quán con số thật. Dễ chỉnh (một hằng số trong Action), nhưng nên xác nhận lại khi có phản hồi thực tế dùng — 12/08
+
+---
+
 ## Lãi gộp không còn ngụy trang (P4-4B.0) — một việc ngoài phạm vi
 
 [Bước 4B.1] `app/Domain/Reporting/Queries/GetOwnerProfitDashboard.php` (đã có sẵn từ Phase 3 Bước 8) tự tính lại `$laiGop = $doanhThu - $giaVon` bằng SQL riêng (SUM trực tiếp trên `product_profit_daily`), KHÔNG đọc cột `profit_amount` — nên việc sửa K19 (`profit_amount` NULL khi thiếu giá vốn, thêm `revenue_uncosted_amount`) ở Bước 4B.0 KHÔNG tự động sửa màn hình này. `GetOwnerProfitDashboard` vẫn đang cộng lẫn doanh thu chưa có giá vốn vào lãi gộp hiển thị y như cũ (dù đã có sẵn cảnh báo `thieu_gia_von`/`canh_bao` riêng ở cuối). Khi làm 4B.1 phải đổi cách tính trong file này sang đọc `profit_amount` (NULL) và `revenue_uncosted_amount` trực tiếp từ bảng, không tự SUM(revenue_amount) - SUM(cost_amount) nữa — 12/08
