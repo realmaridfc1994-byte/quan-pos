@@ -158,7 +158,7 @@ Kèm theo khi làm lại: báo cáo công nợ điểm đang lưu hành.
 
 [Bước sau] Khách quét QR: chưa có màn hình nào cho khách (lượt 2). Cơ chế token và tem QR đã xong; đường gọi món chưa làm — 14/08
 
-[Bước sau] `composer audit` báo 6 lỗ hổng (1 cao, mức DoS) ở `league/commonmark` bản < 2.9.0 — thư viện này ĐÃ CÓ SẴN từ trước, đi kèm Laravel/Filament, KHÔNG phải do package QR mới cài. Nâng nó lên là đụng luật "không tự nâng phiên bản", cần chủ dự án đồng ý. Rủi ro thực tế thấp với quán chạy mạng nội bộ (lỗ hổng cần kẻ tấn công gửi được markdown độc vào hệ thống), nhưng phải xử lý trước khi đưa lên tên miền công khai — 14/08
+[ĐÃ XỬ LÝ 14/08] `composer audit` báo 6 lỗ hổng (1 cao, mức DoS) ở `league/commonmark` 2.8.3 — thư viện đi kèm Laravel, không phải do package QR. XỬ LÝ: chủ dự án đồng ý nâng với điều kiện không ảnh hưởng gì. Đã nâng **CHỈ MỘT gói** `league/commonmark` 2.8.3 → 2.10.0 bằng `composer update league/commonmark --with-dependencies`. `composer.json` KHÔNG đổi một chữ (đây là phụ thuộc gián tiếp, `laravel/framework` đòi `^2.8.1` nên 2.10.0 vẫn khớp, không phải nâng Laravel). Không gói nào khác đổi phiên bản. 834 test xanh, `composer audit` sạch — 14/08
 
 [Bước sau] Cột `dining_tables.public_code` hiện chỉ sinh ở `MaBanCongKhai::sinh()` qua Factory và Seeder. Chưa có màn hình nào tạo bàn mới (không có Filament resource cho `dining_tables`), nên chưa có đường nào quên gán. Khi làm màn hình quản lý bàn thì PHẢI gán mã ở đó, và **KHÔNG được đổi mã của bàn đã có** — đổi là tem QR đã dán thành vô dụng — 14/08
 
