@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Sync\Models;
 
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 
-final class SyncAppliedOp extends Model
+final class SyncAppliedOp extends BaseModel
 {
     public $incrementing = false;
 

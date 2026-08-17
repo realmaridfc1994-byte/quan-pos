@@ -11,9 +11,9 @@ use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Reservations\Enums\DepositStatus;
 use App\Domain\Reservations\Enums\ReservationStatus;
 use App\Domain\Staffing\Models\User;
+use App\Models\BaseModel;
 use Database\Factories\ReservationFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -23,7 +23,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * dining_table_id chỉ là gợi ý, KHÔNG giữ chỗ độc quyền (M3) — quán vẫn bán
  * được cho khách vãng lai ngồi đúng bàn đó.
  */
-final class Reservation extends Model
+final class Reservation extends BaseModel
 {
     /** @use HasFactory<ReservationFactory> */
     use HasFactory;

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Inventory\Models;
 
 use App\Domain\Staffing\Models\User;
-use Illuminate\Database\Eloquent\Model;
+use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * Không đụng một chữ nào vào sổ cái. Chỉ làm lệnh đối soát thôi đếm dòng đó
  * vào số lỗi — dòng vẫn được liệt kê đầy đủ trong bản đối soát.
  */
-final class StockReconciliationNote extends Model
+final class StockReconciliationNote extends BaseModel
 {
     protected $fillable = [
         'stock_movement_id',

@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Loyalty\Models;
 
+use App\Models\BaseModel;
 use Database\Factories\CustomerFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 
 /**
  * Sổ khách quen — không xoá, nghỉ chơi thì tắt is_active (docs/schema.md PHẦN L, luật 14 CLAUDE.md).
@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Model;
  * vậy CHƯA có quan hệ pointBalance()/pointTransactions() — thêm lại khi làm
  * tiếp, tham khảo branch park/loyalty-4a1.
  */
-final class Customer extends Model
+final class Customer extends BaseModel
 {
     /** @use HasFactory<CustomerFactory> */
     use HasFactory;

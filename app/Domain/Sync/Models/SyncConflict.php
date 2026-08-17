@@ -7,12 +7,12 @@ namespace App\Domain\Sync\Models;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Staffing\Models\User;
 use App\Domain\Sync\Enums\ConflictStatus;
+use App\Models\BaseModel;
 use Database\Factories\SyncConflictFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-final class SyncConflict extends Model
+final class SyncConflict extends BaseModel
 {
     /** @use HasFactory<SyncConflictFactory> */
     use HasFactory;

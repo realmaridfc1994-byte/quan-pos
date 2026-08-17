@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace App\Domain\Ordering\Models;
 
 use App\Domain\Staffing\Models\User;
+use App\Models\BaseModel;
 use Database\Factories\TableSessionTableFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-final class TableSessionTable extends Model
+final class TableSessionTable extends BaseModel
 {
     /** @use HasFactory<TableSessionTableFactory> */
     use HasFactory;

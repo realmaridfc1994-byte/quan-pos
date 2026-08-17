@@ -26,6 +26,15 @@ final class User extends Authenticatable implements FilamentUser, HasName
     use HasApiTokens, HasFactory, Notifiable;
 
     /**
+     * NGOẠI LỆ DUY NHẤT của App\Models\BaseModel — xem ghi chú trong file đó.
+     *
+     * Model này phải kế thừa Authenticatable để chạy được đăng nhập, Sanctum và
+     * Filament, nên không kế thừa BaseModel được; phải khai tay đúng một dòng
+     * này. Bỏ dòng này đi là bảng users lặng lẽ đi lối khác 34 bảng còn lại.
+     */
+    protected $connection = 'tenant';
+
+    /**
      * Chỉ chủ quán/thu ngân vào được trang quản lý thực đơn — phục vụ/bếp
      * không có việc gì phải sửa giá món hay tắt/bật danh mục.
      */

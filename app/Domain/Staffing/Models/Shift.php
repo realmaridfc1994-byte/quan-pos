@@ -7,15 +7,15 @@ namespace App\Domain\Staffing\Models;
 use App\Domain\Billing\Models\Payment;
 use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Staffing\Enums\ShiftStatus;
+use App\Models\BaseModel;
 use Database\Factories\ShiftFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
-final class Shift extends Model
+final class Shift extends BaseModel
 {
     /** @use HasFactory<ShiftFactory> */
     use HasFactory, LogsActivity;

@@ -29,10 +29,12 @@ use App\Domain\Staffing\Models\User;
 use App\Domain\Staffing\Policies\ShiftPolicy;
 use App\Domain\Staffing\Policies\UserPolicy;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Database\Connection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use RuntimeException;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -41,7 +43,48 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->dungChungMotPhien();
+    }
+
+    /**
+     * Dưới cấu hình MỘT QUÁN, `tenant` và kết nối mặc định là hai cái tên của
+     * cùng một phiên nói chuyện với MariaDB.
+     *
+     * Vì sao phải viết đoạn này thay vì để Laravel tự mở kết nối thứ hai theo
+     * `config/database.php`: Laravel đếm giao dịch và giữ khoá THEO TỪNG PHIÊN.
+     * Hai phiên cùng trỏ vào một database vẫn là hai người khác nhau đối với
+     * MariaDB — người này chưa lưu xong thì người kia không nhìn thấy, và hai
+     * người có thể giành khoá của nhau trên cùng một dòng. Mở phiên thứ hai
+     * ngay lúc này nghĩa là:
+     *
+     *   - Giao dịch mở trên kết nối mặc định KHÔNG bọc được lệnh ghi đi qua
+     *     `tenant`. Hỏng giữa chừng thì một nửa nằm lại trong database, và
+     *     không có gì báo lỗi. Sổ cái kho và đường thu tiền đều nằm trong
+     *     vùng đó.
+     *   - Bộ test mất khả năng cuộn lại: mỗi test chạy trong một giao dịch
+     *     nháp mở trên ĐÚNG MỘT kết nối (kết nối mặc định), nên mọi thứ ghi
+     *     qua `tenant` sẽ nằm lại thật trong database test.
+     *
+     * Cho dùng chung một phiên thì hành vi hôm nay không đổi một chút nào,
+     * trong khi code vẫn được viết bằng đúng cái tên `tenant` mà tương lai
+     * cần. Ngày hệ thống phục vụ nhiều quán thật, gỡ hàm này đi là hai kết
+     * nối tách ra theo đúng `config/database.php` — và ngày đó phải xử lý hai
+     * việc đã ghi sẵn trong `docs/viec-ton.md`.
+     */
+    private function dungChungMotPhien(): void
+    {
+        $this->app->make('db')->extend('tenant', function (array $config, string $ten): Connection {
+            $macDinh = (string) $this->app->make('config')->get('database.default');
+
+            if ($macDinh === $ten) {
+                throw new RuntimeException(
+                    "Kết nối mặc định đang được đặt là '{$ten}', tự trỏ vào chính nó. ".
+                    "Kết nối mặc định phải là 'mariadb' — xem CLAUDE.md mục 2."
+                );
+            }
+
+            return $this->app->make('db')->connection($macDinh);
+        });
     }
 
     /**

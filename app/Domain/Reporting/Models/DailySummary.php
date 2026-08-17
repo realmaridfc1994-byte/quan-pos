@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Domain\Reporting\Models;
 
+use App\Models\BaseModel;
 use Database\Factories\DailySummaryFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 
-final class DailySummary extends Model
+final class DailySummary extends BaseModel
 {
     /** @use HasFactory<DailySummaryFactory> */
     use HasFactory;

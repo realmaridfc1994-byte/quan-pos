@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace App\Domain\Inventory\Models;
 
 use App\Exceptions\StockBalanceWriteNotAllowedException;
+use App\Models\BaseModel;
 use Closure;
 use Database\Factories\StockBalanceFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -24,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * KHÔNG đi qua save()) đều bị chặn trừ khi đang chạy bên trong choPhepGhi().
  * Chỉ App\Domain\Inventory\Actions\RecordStockMovement được gọi choPhepGhi().
  */
-final class StockBalance extends Model
+final class StockBalance extends BaseModel
 {
     /** @use HasFactory<StockBalanceFactory> */
     use HasFactory;

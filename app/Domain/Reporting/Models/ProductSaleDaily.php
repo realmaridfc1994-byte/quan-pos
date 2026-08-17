@@ -6,12 +6,12 @@ namespace App\Domain\Reporting\Models;
 
 use App\Domain\Catalog\Models\Product;
 use App\Domain\Catalog\Models\ProductVariant;
+use App\Models\BaseModel;
 use Database\Factories\ProductSaleDailyFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-final class ProductSaleDaily extends Model
+final class ProductSaleDaily extends BaseModel
 {
     /** @use HasFactory<ProductSaleDailyFactory> */
     use HasFactory;

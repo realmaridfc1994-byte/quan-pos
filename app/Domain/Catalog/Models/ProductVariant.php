@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace App\Domain\Catalog\Models;
 
 use App\Domain\Inventory\Models\Recipe;
+use App\Models\BaseModel;
 use Database\Factories\ProductVariantFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-final class ProductVariant extends Model
+final class ProductVariant extends BaseModel
 {
     /** @use HasFactory<ProductVariantFactory> */
     use HasFactory;

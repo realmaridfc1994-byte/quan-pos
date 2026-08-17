@@ -84,6 +84,49 @@ return [
             ]) : [],
         ],
 
+        /*
+        |----------------------------------------------------------------------
+        | tenant — kết nối chứa dữ liệu của quán
+        |----------------------------------------------------------------------
+        |
+        | Mọi bảng nghiệp vụ (bàn, lượt khách, món, phiếu thu, ca, kho...) đi
+        | qua kết nối này, không đi qua kết nối mặc định. Xem CLAUDE.md.
+        |
+        | THÔNG SỐ PHẢI TRÙNG KHÍT với khối `mariadb` ở trên — cùng env, cùng
+        | driver, cùng bảng mã. Hôm nay hai cái tên trỏ vào cùng một database
+        | của cùng một quán; ngày hệ thống phục vụ nhiều quán thì chỉ khối này
+        | đổi, còn code không phải đổi một chữ nào vì nó đã gọi tên `tenant`
+        | từ trước.
+        |
+        | Lưu ý cho người sửa file này: dưới cấu hình một quán, kết nối
+        | `tenant` được `App\Providers\AppServiceProvider` cho dùng chung đúng
+        | một phiên nói chuyện với MariaDB với kết nối mặc định — nên sửa các
+        | thông số dưới đây SẼ KHÔNG có tác dụng gì cho tới ngày gỡ đoạn dùng
+        | chung đó. Đọc chú thích trong `AppServiceProvider::dungChungMotPhien`
+        | trước khi đổi.
+        |
+        */
+
+        'tenant' => [
+            'driver' => 'mariadb',
+            'url' => env('DB_URL'),
+            'host' => env('DB_HOST', '127.0.0.1'),
+            'port' => env('DB_PORT', '3306'),
+            'database' => env('DB_DATABASE', 'laravel'),
+            'username' => env('DB_USERNAME', 'root'),
+            'password' => env('DB_PASSWORD', ''),
+            'unix_socket' => env('DB_SOCKET', ''),
+            'charset' => env('DB_CHARSET', 'utf8mb4'),
+            'collation' => env('DB_COLLATION', 'utf8mb4_unicode_ci'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
         'pgsql' => [
             'driver' => 'pgsql',
             'url' => env('DB_URL'),

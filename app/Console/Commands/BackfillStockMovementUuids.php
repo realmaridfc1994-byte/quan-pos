@@ -40,7 +40,7 @@ final class BackfillStockMovementUuids extends Command
                     // vừa mới thêm, không phải sửa nghiệp vụ. Cố tình KHÔNG mở
                     // một "cửa được phép" trên Model như StockBalance có, vì
                     // cửa đó sẽ sống mãi còn việc này chỉ chạy một lần.
-                    DB::table('stock_movements')
+                    DB::connection('tenant')->table('stock_movements')
                         ->where('id', $mot->id)
                         ->update(['uuid' => (string) Str::uuid()]);
                     $soDong++;

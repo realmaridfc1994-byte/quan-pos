@@ -6,11 +6,11 @@ namespace App\Domain\Billing\Models;
 
 use App\Domain\Billing\Enums\PromotionAppliesTo;
 use App\Domain\Billing\Enums\PromotionType;
+use App\Models\BaseModel;
 use Database\Factories\PromotionFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 
-final class Promotion extends Model
+final class Promotion extends BaseModel
 {
     /** @use HasFactory<PromotionFactory> */
     use HasFactory;

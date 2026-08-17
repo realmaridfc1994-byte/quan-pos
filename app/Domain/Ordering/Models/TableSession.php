@@ -9,13 +9,13 @@ use App\Domain\Billing\Models\Promotion;
 use App\Domain\Ordering\Enums\TableSessionStatus;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
+use App\Models\BaseModel;
 use Database\Factories\TableSessionFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-final class TableSession extends Model
+final class TableSession extends BaseModel
 {
     /** @use HasFactory<TableSessionFactory> */
     use HasFactory;

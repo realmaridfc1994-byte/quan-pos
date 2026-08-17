@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace App\Domain\Reporting\Models;
 
 use App\Domain\Inventory\Models\Ingredient;
+use App\Models\BaseModel;
 use Database\Factories\IngredientWasteMonthlyFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-final class IngredientWasteMonthly extends Model
+final class IngredientWasteMonthly extends BaseModel
 {
     /** @use HasFactory<IngredientWasteMonthlyFactory> */
     use HasFactory;
