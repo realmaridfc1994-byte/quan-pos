@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Inventory\Models;
 
+use App\Models\BaseModel;
 use Database\Factories\StockTakeItemFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * — cố tình KHÔNG có trong $fillable, xem tests/Feature/Database/GeneratedColumnsTest.php
  * cho các cột sinh tự động khác trong dự án.
  */
-final class StockTakeItem extends Model
+final class StockTakeItem extends BaseModel
 {
     /** @use HasFactory<StockTakeItemFactory> */
     use HasFactory;

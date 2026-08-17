@@ -33,7 +33,7 @@ final class CancelReservation
             throw new DomainException('Phải ghi rõ lý do huỷ đặt bàn.');
         }
 
-        return DB::transaction(function () use ($data, $lyDo): Reservation {
+        return DB::connection('tenant')->transaction(function () use ($data, $lyDo): Reservation {
             $reservation = Reservation::query()->lockForUpdate()->findOrFail($data->reservationId);
 
             if (! in_array($reservation->status, [ReservationStatus::Pending, ReservationStatus::Confirmed], true)) {

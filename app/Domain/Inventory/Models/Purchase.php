@@ -6,13 +6,13 @@ namespace App\Domain\Inventory\Models;
 
 use App\Domain\Inventory\Enums\PurchaseStatus;
 use App\Domain\Staffing\Models\User;
+use App\Models\BaseModel;
 use Database\Factories\PurchaseFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-final class Purchase extends Model
+final class Purchase extends BaseModel
 {
     /** @use HasFactory<PurchaseFactory> */
     use HasFactory;

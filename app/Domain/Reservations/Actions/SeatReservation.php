@@ -27,7 +27,7 @@ final class SeatReservation
 {
     public function handle(SeatReservationData $data): Reservation
     {
-        return DB::transaction(function () use ($data): Reservation {
+        return DB::connection('tenant')->transaction(function () use ($data): Reservation {
             $tableSession = TableSession::query()->lockForUpdate()->findOrFail($data->tableSessionId);
 
             if ($tableSession->status !== TableSessionStatus::Open) {

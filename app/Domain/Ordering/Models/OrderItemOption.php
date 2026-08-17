@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace App\Domain\Ordering\Models;
 
 use App\Domain\Catalog\Models\Option;
+use App\Models\BaseModel;
 use Database\Factories\OrderItemOptionFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-final class OrderItemOption extends Model
+final class OrderItemOption extends BaseModel
 {
     /** @use HasFactory<OrderItemOptionFactory> */
     use HasFactory;

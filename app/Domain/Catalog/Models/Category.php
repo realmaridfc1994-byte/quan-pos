@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace App\Domain\Catalog\Models;
 
 use App\Domain\Catalog\Enums\Station;
+use App\Models\BaseModel;
 use Database\Factories\CategoryFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-final class Category extends Model
+final class Category extends BaseModel
 {
     /** @use HasFactory<CategoryFactory> */
     use HasFactory;

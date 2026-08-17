@@ -9,10 +9,10 @@ use App\Domain\Inventory\Enums\StockMovementType;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
 use App\Exceptions\StockMovementImmutableException;
+use App\Models\BaseModel;
 use Database\Factories\StockMovementFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -41,7 +41,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * không thừa nhau: lớp này báo lỗi sớm và rõ nghĩa cho người viết code, lớp
  * kia là chốt cuối cùng cho dữ liệu.
  */
-final class StockMovement extends Model
+final class StockMovement extends BaseModel
 {
     /** @use HasFactory<StockMovementFactory> */
     use HasFactory;

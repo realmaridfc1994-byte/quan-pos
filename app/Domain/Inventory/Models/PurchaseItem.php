@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Domain\Inventory\Models;
 
+use App\Models\BaseModel;
 use Database\Factories\PurchaseItemFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * ALWAYS ... STORED) — cố tình KHÔNG có trong $fillable, xem
  * tests/Feature/Database/GeneratedColumnsTest.php.
  */
-final class PurchaseItem extends Model
+final class PurchaseItem extends BaseModel
 {
     /** @use HasFactory<PurchaseItemFactory> */
     use HasFactory;

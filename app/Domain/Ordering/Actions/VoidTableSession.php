@@ -24,7 +24,7 @@ final class VoidTableSession
 {
     public function handle(VoidTableSessionData $data): TableSession
     {
-        return DB::transaction(function () use ($data): TableSession {
+        return DB::connection('tenant')->transaction(function () use ($data): TableSession {
             $tableSession = TableSession::query()->lockForUpdate()->findOrFail($data->tableSessionId);
 
             if (! in_array($tableSession->status, [TableSessionStatus::Open, TableSessionStatus::Billing], true)) {

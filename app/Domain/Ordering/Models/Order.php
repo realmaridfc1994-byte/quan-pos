@@ -7,15 +7,15 @@ namespace App\Domain\Ordering\Models;
 use App\Domain\Catalog\Enums\Station;
 use App\Domain\Ordering\Enums\OrderStatus;
 use App\Domain\Staffing\Models\User;
+use App\Models\BaseModel;
 use Database\Factories\OrderFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
-final class Order extends Model
+final class Order extends BaseModel
 {
     /** @use HasFactory<OrderFactory> */
     use HasFactory, LogsActivity;

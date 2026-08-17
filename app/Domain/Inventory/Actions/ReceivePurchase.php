@@ -27,7 +27,7 @@ final class ReceivePurchase
 
     public function handle(ReceivePurchaseData $data): Purchase
     {
-        return DB::transaction(function () use ($data): Purchase {
+        return DB::connection('tenant')->transaction(function () use ($data): Purchase {
             $purchase = Purchase::query()->lockForUpdate()->findOrFail($data->purchaseId);
 
             // Kiểm status TRƯỚC khi chạm sổ cái — nhận hai lần phải bị chặn ở

@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace App\Domain\Catalog\Models;
 
+use App\Models\BaseModel;
 use Database\Factories\OptionGroupFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-final class OptionGroup extends Model
+final class OptionGroup extends BaseModel
 {
     /** @use HasFactory<OptionGroupFactory> */
     use HasFactory;

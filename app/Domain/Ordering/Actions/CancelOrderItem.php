@@ -10,6 +10,7 @@ use App\Domain\Ordering\Models\Order;
 use App\Domain\Ordering\Models\OrderItem;
 use App\Domain\Staffing\Actions\VerifyApproverPin;
 use App\Domain\Staffing\DTO\PinVerifyData;
+use App\Domain\Staffing\Models\User;
 use App\Exceptions\DomainException;
 use Illuminate\Support\Facades\DB;
 
@@ -31,6 +32,13 @@ use Illuminate\Support\Facades\DB;
  * order_item_options của nó — cả hai loại bản ghi này nhận uuid do MÁY POS
  * gửi lên (Phase 2 Bước 2, giống PlaceOrder), vì bấm huỷ cũng là thao tác
  * nhân viên cần chống tạo trùng khi mạng lag/bấm hai lần.
+ *
+ * ── PIN DUYỆT ĐI TRƯỚC GIAO DỊCH (sửa 17/08, CLAUDE.md mục 12) ───────────
+ * Trước đây PIN được xác thực BÊN TRONG giao dịch. Hậu quả im lặng: nhập sai
+ * PIN thì bộ đếm số lần sai (bảng `cache`) và dòng nhật ký "thử PIN sai" bị
+ * quay lui cùng giao dịch, nên cơ chế khoá 15 phút sau 5 lần sai không bao
+ * giờ đếm tới. Giờ xác thực xong mới mở giao dịch; bên trong chỉ còn TỪ CHỐI
+ * nếu món hoá ra đã "served" mà không ai duyệt, không hỏi PIN giữa chừng.
  */
 final class CancelOrderItem
 {
@@ -40,7 +48,9 @@ final class CancelOrderItem
 
     public function handle(CancelOrderItemData $data): OrderItem
     {
-        return DB::transaction(function () use ($data): OrderItem {
+        $nguoiDuyet = $this->duyetPinTruocGiaoDich($data);
+
+        return DB::connection('tenant')->transaction(function () use ($data, $nguoiDuyet): OrderItem {
             $order = Order::query()->lockForUpdate()->findOrFail($data->orderId);
             $item = OrderItem::query()->where('order_id', $order->id)->lockForUpdate()->findOrFail($data->orderItemId);
 
@@ -57,8 +67,10 @@ final class CancelOrderItem
                 throw new DomainException('Phải ghi rõ lý do huỷ món.');
             }
 
-            if ($item->status === OrderItemStatus::Served) {
-                $this->duyetBangPin($data);
+            // Từ chối, không hỏi PIN — giao dịch đang giữ khoá trên phiếu và
+            // dòng món, treo nó chờ người nhập PIN là chặn cả bếp lẫn quầy.
+            if ($item->status === OrderItemStatus::Served && $nguoiDuyet === null) {
+                throw new DomainException('Món đã phục vụ ra bàn, phải có người duyệt bằng mã PIN mới huỷ được.');
             }
 
             $dongDaHuy = $data->quantity === $item->quantity
@@ -71,13 +83,22 @@ final class CancelOrderItem
         });
     }
 
-    private function duyetBangPin(CancelOrderItemData $data): void
+    /**
+     * Xác thực PIN NGOÀI mọi giao dịch (CLAUDE.md mục 12). Trả về người duyệt,
+     * hoặc null khi lần bấm này không gửi PIN nào.
+     *
+     * Cố ý xác thực kể cả khi món chưa chắc đã "served": trạng thái thật chỉ
+     * biết được sau khi khoá dòng món, mà lúc đó thì đã quá muộn để hỏi. Gửi
+     * PIN sai cho một món chưa phục vụ vì vậy cũng bị từ chối — trước đây bị
+     * bỏ qua im lặng, và bỏ qua một mã PIN sai là đúng cái việc không nên làm.
+     */
+    private function duyetPinTruocGiaoDich(CancelOrderItemData $data): ?User
     {
         if ($data->approverUserId === null || $data->approverPin === null) {
-            throw new DomainException('Món đã phục vụ ra bàn, phải có người duyệt bằng mã PIN mới huỷ được.');
+            return null;
         }
 
-        $this->verifyApproverPin->handle(new PinVerifyData(
+        return $this->verifyApproverPin->handle(new PinVerifyData(
             userId: $data->approverUserId,
             pin: $data->approverPin,
             requestedByUserId: $data->cancelledByUserId,

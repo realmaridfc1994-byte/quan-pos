@@ -17,7 +17,7 @@ final class SetDefaultProductVariant
 {
     public function handle(ProductVariant $variant): ProductVariant
     {
-        return DB::transaction(function () use ($variant): ProductVariant {
+        return DB::connection('tenant')->transaction(function () use ($variant): ProductVariant {
             ProductVariant::query()
                 ->where('product_id', $variant->product_id)
                 ->where('id', '!=', $variant->id)

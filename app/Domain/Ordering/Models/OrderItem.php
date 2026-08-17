@@ -8,13 +8,13 @@ use App\Domain\Catalog\Models\Product;
 use App\Domain\Catalog\Models\ProductVariant;
 use App\Domain\Ordering\Enums\OrderItemStatus;
 use App\Domain\Staffing\Models\User;
+use App\Models\BaseModel;
 use Database\Factories\OrderItemFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-final class OrderItem extends Model
+final class OrderItem extends BaseModel
 {
     /** @use HasFactory<OrderItemFactory> */
     use HasFactory;

@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace App\Domain\Inventory\Models;
 
 use App\Domain\Inventory\Enums\IngredientBaseUnit;
+use App\Models\BaseModel;
 use Database\Factories\IngredientFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-final class Ingredient extends Model
+final class Ingredient extends BaseModel
 {
     /** @use HasFactory<IngredientFactory> */
     use HasFactory;

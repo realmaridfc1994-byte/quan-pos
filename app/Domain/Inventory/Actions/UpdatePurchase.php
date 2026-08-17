@@ -29,7 +29,7 @@ final class UpdatePurchase
 
         $this->kiemTraTrungNguyenLieu($data->lines);
 
-        return DB::transaction(function () use ($data): Purchase {
+        return DB::connection('tenant')->transaction(function () use ($data): Purchase {
             $purchase = Purchase::query()->lockForUpdate()->findOrFail($data->purchaseId);
 
             if ($purchase->status !== PurchaseStatus::Draft) {

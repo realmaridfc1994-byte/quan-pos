@@ -75,16 +75,42 @@ it('mã bàn sai định dạng bị chặn ngay ở cửa', function (string $m
 
 // ── Mã bàn không đoán được ───────────────────────────────────────────────
 
-it('mã bàn không đoán được từ id tuần tự hay từ mã bàn in trên tem', function () {
+/**
+ * Luật cần giữ: MÃ CÔNG KHAI CỦA BÀN KHÔNG SUY RA ĐƯỢC TỪ ID NỘI BỘ.
+ * Kẻ rảnh rỗi không được phép dò tuần tự bàn 1, bàn 2, bàn 3.
+ *
+ * Bản cũ diễn đạt luật này bằng "chuỗi mã không CHỨA chữ số của id" — sai
+ * cách. Mã là 22 ký tự ngẫu nhiên trên bảng chữ 62 ký tự CÓ CẢ CHỮ SỐ, nên
+ * khẳng định đó là tung đồng xu chứ không phải bất biến: đo thật 200.000 lần
+ * cho ra 30,1% "vi phạm" khi id có 1 chữ số, 0,54% khi 2 chữ số. Test đó xanh
+ * 70% số lần — nó không phải test yếu, nó là test giả, và một test tung đồng
+ * xu trong suite làm hỏng luôn cổng "toàn bộ suite xanh" của mọi bước khác
+ * (không ai phân biệt được đỏ-do-mình với đỏ-do-may-rủi). Xem CLAUDE.md mục 23.
+ *
+ * Cách diễn đạt đúng: kiểm NGUỒN SINH mã, không kiểm NỘI DUNG chuỗi. Bốn
+ * khẳng định dưới đây đều tất định — chạy 200.000 lần vẫn một kết quả.
+ */
+it('mã bàn không suy ra được từ id nội bộ hay từ mã bàn in trên tem', function () {
+    // 1. Bộ sinh mã KHÔNG NHẬN THAM SỐ NÀO — nên nó không thể nhìn thấy id để
+    //    mà suy ra. Đây là khẳng định thay thế cho phép thử tung đồng xu cũ.
+    expect((new ReflectionMethod(MaBanCongKhai::class, 'sinh'))->getNumberOfParameters())
+        ->toBe(0, 'MaBanCongKhai::sinh() mà nhận tham số thì mã bàn có thể bị sinh từ id — '
+            .'đúng cái việc luật này cấm. Xem ghi chú đầu app/Support/MaBanCongKhai.php.');
+
+    // 2. Gọi hai lần ra hai kết quả khác nhau — mã không phải hàm tất định của
+    //    BẤT KỲ thứ gì, kể cả id.
+    expect(MaBanCongKhai::sinh())->not->toBe(MaBanCongKhai::sinh());
+
     $ban = DiningTable::factory()->create(['code' => 'B01']);
 
+    // 3. Đủ độ dài đã chốt, và không phải là mã in trên tem.
     expect($ban->public_code)->toHaveLength(MaBanCongKhai::DO_DAI)
-        ->and($ban->public_code)->not->toContain((string) $ban->id)
-        ->and($ban->public_code)->not->toBe($ban->code)
-        ->and($ban->public_code)->not->toContain('B01');
+        ->and($ban->public_code)->not->toBe($ban->code);
 
-    // Và hai bàn liền nhau không ra hai mã liền nhau.
-    $ban2 = DiningTable::factory()->create();
+    // 4. HAI BÀN CÙNG MÃ TEM vẫn ra hai mã công khai khác nhau — nên mã không
+    //    suy ra từ dữ liệu của chính dòng đó. (Trùng nhau là chuyện 1 trên
+    //    62^22, không phải chuyện may rủi trong một lần chạy test.)
+    $ban2 = DiningTable::factory()->create(['code' => 'B01-ban-hai']);
     expect($ban2->public_code)->not->toBe($ban->public_code);
 });
 

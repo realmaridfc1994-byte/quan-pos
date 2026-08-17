@@ -104,12 +104,25 @@ final class Phase0Check extends Command
         $this->mucConChuaXong[] = $noiDung;
     }
 
+    /**
+     * Cả lệnh này soi ĐÚNG MỘT thứ: cái database đang giữ dữ liệu của quán —
+     * tức kết nối `tenant`, không phải kết nối mặc định. Hôm nay hai cái là
+     * một phiên nên hỏi bên nào cũng ra cùng câu trả lời; ngày tách phiên
+     * (Bước 5B) mà còn hỏi kết nối mặc định thì lệnh này sẽ soi một database
+     * khác rồi báo "đủ 15 bảng, không có ca nào mở" — trả lời sai mà trông
+     * vẫn đúng, đúng loại lỗi im lặng cả Phase 5 đang dọn.
+     *
+     * Trước 17/08 hàm này còn đọc `connections.mysql.host` — khối cấu hình của
+     * một kết nối KHÔNG AI DÙNG (dự án chạy trên khối `mariadb`). May là hai
+     * khối cùng đọc một biến môi trường nên số in ra vẫn đúng; sai ở chỗ đọc,
+     * không ở chỗ kết quả. Đã ghi `docs/viec-ton.md` từ 15/08, sửa luôn ở đây.
+     */
     private function kiemTraKetNoiDatabase(): void
     {
         try {
-            $host = config('database.connections.mysql.host');
-            $port = config('database.connections.mysql.port');
-            $phienBan = DB::selectOne('select version() as v')->v;
+            $host = config('database.connections.tenant.host');
+            $port = config('database.connections.tenant.port');
+            $phienBan = DB::connection('tenant')->selectOne('select version() as v')->v;
             $this->baoOk("Kết nối được database ở {$host}:{$port} — phiên bản: {$phienBan}");
         } catch (\Throwable $e) {
             $this->baoFail('Không kết nối được database: '.$e->getMessage());
@@ -144,7 +157,7 @@ final class Phase0Check extends Command
 
     private function kiemTraCharset(): void
     {
-        $hang = DB::selectOne(
+        $hang = DB::connection('tenant')->selectOne(
             'select DEFAULT_CHARACTER_SET_NAME as bang_ma, DEFAULT_COLLATION_NAME as doi_chieu
              from information_schema.SCHEMATA where SCHEMA_NAME = DATABASE()'
         );
@@ -167,7 +180,7 @@ final class Phase0Check extends Command
 
     private function kiemTraSoBang(): void
     {
-        $tenBangThat = DB::table('information_schema.tables')
+        $tenBangThat = DB::connection('tenant')->table('information_schema.tables')
             ->where('table_schema', DB::raw('DATABASE()'))
             ->whereIn('table_name', self::BANG_NGHIEP_VU)
             ->orderBy('table_name')
@@ -190,7 +203,7 @@ final class Phase0Check extends Command
         $thieu = [];
 
         foreach (self::CHI_MUC_CHAN_LOI as $bang => $danhSachChiMuc) {
-            $chiMucThat = DB::table('information_schema.statistics')
+            $chiMucThat = DB::connection('tenant')->table('information_schema.statistics')
                 ->where('table_schema', DB::raw('DATABASE()'))
                 ->where('table_name', $bang)
                 ->distinct()
@@ -328,7 +341,7 @@ final class Phase0Check extends Command
             return false;
         }
 
-        if (DB::table('shifts')->where('status', 'open')->exists()) {
+        if (DB::connection('tenant')->table('shifts')->where('status', 'open')->exists()) {
             $this->line('<fg=red>❌ Đang có ca làm việc mở. Không chạy test khi quán đang bán hàng.</>');
 
             return false;

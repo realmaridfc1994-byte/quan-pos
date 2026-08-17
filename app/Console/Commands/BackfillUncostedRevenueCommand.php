@@ -158,7 +158,7 @@ final class BackfillUncostedRevenueCommand extends Command
     ): ?array {
         $doanhThuCu = DailySummary::query()->where('date', $ngay->toDateString())->value('revenue_amount');
 
-        DB::beginTransaction();
+        DB::connection('tenant')->beginTransaction();
 
         try {
             $tomTatNgay->handle($ngay->toDateString());
@@ -167,13 +167,13 @@ final class BackfillUncostedRevenueCommand extends Command
             $sau = $this->docSoLieu($ngay);
 
             if ($chayThu) {
-                DB::rollBack();
+                DB::connection('tenant')->rollBack();
 
                 return $sau;
             }
 
             if ($doanhThuCu !== null && (int) $doanhThuCu !== $sau['doanh_thu_ket'] && ! $this->option('dong-y-doanh-thu-doi')) {
-                DB::rollBack();
+                DB::connection('tenant')->rollBack();
 
                 $this->newLine();
                 $this->error(
@@ -184,11 +184,11 @@ final class BackfillUncostedRevenueCommand extends Command
                 return null;
             }
 
-            DB::commit();
+            DB::connection('tenant')->commit();
 
             return $sau;
         } catch (Throwable $e) {
-            DB::rollBack();
+            DB::connection('tenant')->rollBack();
 
             throw $e;
         }

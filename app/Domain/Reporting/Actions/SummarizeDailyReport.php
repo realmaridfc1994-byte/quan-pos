@@ -58,7 +58,7 @@ final class SummarizeDailyReport
     {
         $ngay = Carbon::parse($date)->startOfDay();
 
-        return DB::transaction(function () use ($ngay): DailySummary {
+        return DB::connection('tenant')->transaction(function () use ($ngay): DailySummary {
             $tomTatNgay = $this->tongHopNgay($ngay);
             $tongHopMon = $this->tongHopTheoMon($ngay);
 

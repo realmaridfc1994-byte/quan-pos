@@ -43,7 +43,7 @@ final class UpdateOrderItemStatus
 
     public function handle(UpdateOrderItemStatusData $data): OrderItem
     {
-        return DB::transaction(function () use ($data): OrderItem {
+        return DB::connection('tenant')->transaction(function () use ($data): OrderItem {
             // Khoá PHIẾU BẾP trước rồi mới tới DÒNG MÓN — đúng chiều với
             // CancelOrderItem (sửa 12/08, review Phase 3 Bước 10). Trước đây
             // Action này khoá ngược lại: dòng món → tồn kho → phiếu bếp, trong

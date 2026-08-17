@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Domain\Inventory\Models;
 
+use App\Models\BaseModel;
 use Database\Factories\IngredientUnitFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-final class IngredientUnit extends Model
+final class IngredientUnit extends BaseModel
 {
     /** @use HasFactory<IngredientUnitFactory> */
     use HasFactory;

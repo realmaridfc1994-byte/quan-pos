@@ -59,7 +59,7 @@ final class VoidPayment
 {
     public function handle(VoidPaymentData $data): Payment
     {
-        return DB::transaction(function () use ($data): Payment {
+        return DB::connection('tenant')->transaction(function () use ($data): Payment {
             $payment = Payment::query()->lockForUpdate()->findOrFail($data->paymentId);
 
             if ($payment->status === PaymentStatus::Voided) {

@@ -6,10 +6,10 @@ namespace App\Domain\Inventory\Models;
 
 use App\Domain\Inventory\Enums\StockTakeStatus;
 use App\Domain\Staffing\Models\User;
+use App\Models\BaseModel;
 use Closure;
 use Database\Factories\StockTakeFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -17,7 +17,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * Phiếu kiểm kê. open_guard là cột sinh tự động (K13) — cố tình KHÔNG có
  * trong $fillable, giống purchase_items.qty_base.
  */
-final class StockTake extends Model
+final class StockTake extends BaseModel
 {
     /**
      * Cờ báo "đang trong lúc chốt phiếu kiểm kê".

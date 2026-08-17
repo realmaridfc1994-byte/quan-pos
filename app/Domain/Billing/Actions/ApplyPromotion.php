@@ -44,7 +44,7 @@ final class ApplyPromotion
 
     public function handle(ApplyPromotionData $data): TableSession
     {
-        return DB::transaction(function () use ($data): TableSession {
+        return DB::connection('tenant')->transaction(function () use ($data): TableSession {
             $khuyenMai = Promotion::query()
                 ->where('code', $data->promotionCode)
                 ->lockForUpdate()

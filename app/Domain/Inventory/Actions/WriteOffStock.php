@@ -119,7 +119,7 @@ final class WriteOffStock
         // ở lớp 2. Chủ quán tự ghi và lô đã có PIN duyệt thì khỏi kiểm.
         $canKiemLai = $nguoiGhi->role !== UserRole::Owner && $nguoiDuyet === null;
 
-        return DB::transaction(function () use ($data, $chiTiet, $nguoiDuyet, $canKiemLai): StockMovement {
+        return DB::connection('tenant')->transaction(function () use ($data, $chiTiet, $nguoiDuyet, $canKiemLai): StockMovement {
             $movement = $this->recordStockMovement->handle(new RecordStockMovementData(
                 uuid: $data->uuid,
                 ingredientId: $data->ingredientId,

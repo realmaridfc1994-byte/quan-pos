@@ -6,16 +6,16 @@ namespace App\Domain\Reporting\Models;
 
 use App\Domain\Catalog\Models\Product;
 use App\Domain\Catalog\Models\ProductVariant;
+use App\Models\BaseModel;
 use Database\Factories\ProductProfitDailyFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * profit_amount do MySQL tự tính (GENERATED ALWAYS ... STORED) — cố tình
  * KHÔNG có trong $fillable, giống purchase_items.qty_base.
  */
-final class ProductProfitDaily extends Model
+final class ProductProfitDaily extends BaseModel
 {
     /** @use HasFactory<ProductProfitDailyFactory> */
     use HasFactory;

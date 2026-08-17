@@ -18,7 +18,7 @@ final class RecordCashMovement
 {
     public function handle(RecordCashMovementData $data): CashMovement
     {
-        return DB::transaction(function () use ($data): CashMovement {
+        return DB::connection('tenant')->transaction(function () use ($data): CashMovement {
             $shift = Shift::query()->lockForUpdate()->findOrFail($data->shiftId);
 
             if ($shift->status !== ShiftStatus::Open) {

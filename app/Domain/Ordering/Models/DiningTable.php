@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Domain\Ordering\Models;
 
+use App\Models\BaseModel;
 use Database\Factories\DiningTableFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-final class DiningTable extends Model
+final class DiningTable extends BaseModel
 {
     /** @use HasFactory<DiningTableFactory> */
     use HasFactory;

@@ -39,7 +39,7 @@ final class OpenStockTake
             throw new DomainException('Còn bàn đang phục vụ hoặc chưa tính tiền xong — số liệu kho sẽ đổi giữa chừng. Phải kiểm kê lúc không còn bàn nào mở.');
         }
 
-        return DB::transaction(function () use ($data): StockTake {
+        return DB::connection('tenant')->transaction(function () use ($data): StockTake {
             $daCoPhieuMo = StockTake::query()->where('status', StockTakeStatus::Open)->exists();
             if ($daCoPhieuMo) {
                 throw new DomainException('Đã có một phiếu kiểm kê đang mở — phải chốt phiếu đó trước khi mở phiếu mới.');

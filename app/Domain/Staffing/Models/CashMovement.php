@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace App\Domain\Staffing\Models;
 
 use App\Domain\Staffing\Enums\CashDirection;
+use App\Models\BaseModel;
 use Database\Factories\CashMovementFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-final class CashMovement extends Model
+final class CashMovement extends BaseModel
 {
     /** @use HasFactory<CashMovementFactory> */
     use HasFactory;

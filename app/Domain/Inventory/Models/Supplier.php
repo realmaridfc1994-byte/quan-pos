@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Domain\Inventory\Models;
 
+use App\Models\BaseModel;
 use Database\Factories\SupplierFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 
-final class Supplier extends Model
+final class Supplier extends BaseModel
 {
     /** @use HasFactory<SupplierFactory> */
     use HasFactory;

@@ -10,14 +10,14 @@ use App\Domain\Ordering\Models\TableSession;
 use App\Domain\Reservations\Models\Reservation;
 use App\Domain\Staffing\Models\Shift;
 use App\Domain\Staffing\Models\User;
+use App\Models\BaseModel;
 use Database\Factories\PaymentFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
-final class Payment extends Model
+final class Payment extends BaseModel
 {
     /** @use HasFactory<PaymentFactory> */
     use HasFactory, LogsActivity;

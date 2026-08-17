@@ -41,6 +41,22 @@ use Illuminate\Support\Facades\DB;
  * vì khuyến mãi đã được chủ quán duyệt ngay lúc tạo chương trình, không cần
  * duyệt lại mỗi lần áp. Luật "tổng không được xuống dưới đã trả" (T3) vẫn
  * luôn được kiểm dù có cờ này hay không.
+ *
+ * ── HAI LỚP CHẶN PIN (sửa 17/08, CLAUDE.md mục 12) ───────────────────────
+ * Trước đây PIN được xác thực BÊN TRONG giao dịch. Hậu quả im lặng: nhập sai
+ * PIN thì VerifyApproverPin cộng bộ đếm sai vào bảng `cache` rồi ném lỗi, lỗi
+ * thoát ra khỏi giao dịch, Laravel quay lui — và quay lui luôn cả bộ đếm lẫn
+ * dòng nhật ký "thử PIN sai". Nghĩa là cơ chế khoá 15 phút sau 5 lần sai
+ * KHÔNG BAO GIỜ đếm tới, và không để lại dấu vết ai đang dò PIN.
+ *
+ * Lớp 1 — NGOÀI giao dịch: có gửi PIN thì xác thực ngay tại đây, không cần
+ * biết mức giảm có vượt ngưỡng hay không. Xác thực thừa một lần không hại gì
+ * (PIN đúng chỉ xoá bộ đếm sai), còn xác thực thiếu thì bộ đếm lại bốc hơi.
+ *
+ * Lớp 2 — TRONG giao dịch: % giảm giá CHÍNH THỨC chỉ tính được sau khi đã
+ * khoá lượt khách và tính lại tạm tính. Tới đó mà thấy vượt ngưỡng nhưng
+ * không có ai đã duyệt thì TỪ CHỐI — không hỏi PIN giữa giao dịch đang mở
+ * (đúng cách WriteOffStock::kiemLaiBangSoThat làm với ngưỡng hao hụt).
  */
 final class CalculateBill
 {
@@ -51,7 +67,9 @@ final class CalculateBill
 
     public function handle(CalculateBillData $data): TableSession
     {
-        return DB::transaction(function () use ($data): TableSession {
+        $nguoiDuyet = $this->duyetPinTruocGiaoDich($data);
+
+        return DB::connection('tenant')->transaction(function () use ($data, $nguoiDuyet): TableSession {
             $tableSession = TableSession::query()->lockForUpdate()->findOrFail($data->tableSessionId);
 
             if (! in_array($tableSession->status, [TableSessionStatus::Open, TableSessionStatus::Billing], true)) {
@@ -79,15 +97,12 @@ final class CalculateBill
                 $chinhSachGiam = new TableSessionPolicy;
 
                 if (! $chinhSachGiam->discount($nguoiYeuCau, $tableSession, $phanTram)) {
-                    if ($data->approverUserId === null || $data->approverPin === null) {
+                    // Lớp 2: từ chối, KHÔNG hỏi PIN ở đây — giao dịch đang giữ
+                    // khoá trên lượt khách, treo nó chờ người nhập PIN là khoá
+                    // luôn bàn đó với mọi thu ngân khác.
+                    if ($nguoiDuyet === null) {
                         throw new DomainException('Giảm giá vượt mức cho phép, phải có người duyệt bằng mã PIN.');
                     }
-
-                    $nguoiDuyet = $this->verifyApproverPin->handle(new PinVerifyData(
-                        userId: $data->approverUserId,
-                        pin: $data->approverPin,
-                        requestedByUserId: $data->requestedByUserId,
-                    ));
 
                     if (! $chinhSachGiam->discount($nguoiDuyet, $tableSession, $phanTram)) {
                         throw new DomainException('Người duyệt cũng không đủ thẩm quyền giảm giá ở mức này.');
@@ -119,6 +134,33 @@ final class CalculateBill
 
             return $tableSession->refresh();
         });
+    }
+
+    /**
+     * Lớp 1 — xác thực PIN NGOÀI mọi giao dịch (CLAUDE.md mục 12). Trả về
+     * người duyệt, hoặc null khi lần bấm này không gửi PIN nào.
+     *
+     * Cố ý xác thực kể cả khi mức giảm chưa chắc đã vượt ngưỡng: ngưỡng thật
+     * chỉ biết được sau khi khoá lượt khách và tính lại tạm tính, mà lúc đó
+     * thì đã quá muộn để hỏi. Gửi PIN sai ở lần bấm không cần duyệt vì vậy
+     * cũng bị từ chối — trước đây bị bỏ qua im lặng, và bỏ qua một mã PIN sai
+     * là đúng cái việc không nên làm.
+     */
+    private function duyetPinTruocGiaoDich(CalculateBillData $data): ?User
+    {
+        if ($data->skipApprovalThreshold) {
+            return null;
+        }
+
+        if ($data->approverUserId === null || $data->approverPin === null) {
+            return null;
+        }
+
+        return $this->verifyApproverPin->handle(new PinVerifyData(
+            userId: $data->approverUserId,
+            pin: $data->approverPin,
+            requestedByUserId: $data->requestedByUserId,
+        ));
     }
 
     /**
