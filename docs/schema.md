@@ -2439,3 +2439,73 @@ Chốt chặn thật **không nằm ở việc giấu mã QR** mà nằm ở ch�
 - Đường gọi món (lượt 2)
 - Thanh toán qua kênh này — **sẽ không bao giờ làm**, xem N9
 - Sinh ảnh mã QR / in tem (cần chốt địa chỉ máy quán trong mạng nội bộ trước; đổi địa chỉ là phải in lại tem của mọi bàn)
+
+---
+
+# PHẦN O — CẤU HÌNH CỦA QUÁN (Phase 5 Bước 5A.1)
+
+**Một bảng mới:** `cau_hinh_quan` (bảng thứ 23). Không sửa bảng nào đang có.
+
+## O.1. Vấn đề nó giải
+
+Ba con số chủ quán chỉnh được — ngưỡng "lãi thấp", ngưỡng hao hụt phải có PIN duyệt,
+và mốc ngày đã kiểm thiếu giá vốn — từ Phase 3 nằm **nhờ trong bảng `cache`**. Đó là
+kho tạm: `php artisan cache:clear` là một lệnh vô hại mà ai cũng chạy khi máy giở
+chứng, và nó đưa cả ba về mặc định.
+
+Trong ba con số đó có **ngưỡng bắt PIN khi hao hụt**. Mất nó là lá chắn nới lỏng ra
+mà không ai được báo — đúng loại lỗi im lặng dự án này sợ nhất. Bảng riêng là chỗ ở
+thật của chúng.
+
+Bảng này đồng thời giữ **`ma_quan`** — mã định danh của bản cài đặt, thứ mà bước 5A.4
+(khoá cache), 5A.5 (đường dẫn in trên tem QR) và 5A.6 (máy tính bảng) đều cần.
+
+## O.2. DDL
+
+```sql
+CREATE TABLE cau_hinh_quan (
+    id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    khoa          VARCHAR(64)     NOT NULL COMMENT 'Tên khoá cấu hình, ví dụ ma_quan',
+    gia_tri       TEXT            NULL     COMMENT 'NULL = chưa ai chỉnh, đang dùng giá trị khởi đầu trong config/pos.php',
+    kieu_du_lieu  ENUM('chuoi','so_nguyen','ngay') NOT NULL COMMENT 'Ép kiểu khi đọc ra',
+    mo_ta         VARCHAR(255)    NULL     COMMENT 'Một câu tiếng Việt cho người đọc bảng bằng tay',
+    created_at    TIMESTAMP       NULL,
+    updated_at    TIMESTAMP       NULL,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_cau_hinh_quan_khoa (khoa),
+
+    CONSTRAINT ck_cau_hinh_quan_ma_quan CHECK (
+        khoa <> 'ma_quan' OR (gia_tri IS NOT NULL AND gia_tri <> '')
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+Bốn dòng có mặt ngay từ migration, theo đúng thứ tự này:
+
+| # | `khoa` | `kieu_du_lieu` | Ai ghi |
+|---|---|---|---|
+| 1 | `ma_quan` | `chuoi` | Migration, **một lần duy nhất** |
+| 2 | `nguong_ti_le_lai_thap_phan_tram` | `so_nguyen` | Màn hình "Ngưỡng cảnh báo" |
+| 3 | `nguong_hao_hut_can_pin` | `so_nguyen` | Màn hình "Ngưỡng cảnh báo" |
+| 4 | `moc_ngay_kiem_thieu_gia_von` | `ngay` | Lệnh `report:summarize`, không phải người |
+
+## O.3. Bất biến
+
+| Mã | Bất biến | Chốt ở |
+|---|---|---|
+| O1 | Một khoá chỉ có đúng một dòng. | DB (`uq_cau_hinh_quan_khoa`) |
+| O2 | `gia_tri` bằng NULL nghĩa là **chưa ai chỉnh, đang dùng giá trị khởi đầu trong `config/pos.php`**. Nút "đặt lại mặc định" ghi NULL chứ KHÔNG xoá dòng — sổ của quán không có cục tẩy, kể cả sổ cấu hình. Nhờ vậy đổi số mặc định trong `config/pos.php` vẫn có tác dụng với quán chưa chỉnh lần nào. | APP (`CauHinhQuan`) |
+| O3 | Dòng `ma_quan` không bao giờ được để trống. Mã quán **không có đường rơi về mặc định**: nó đã in lên tem giấy và nằm trong máy tính bảng, đoán bừa một giá trị khác là làm mồ côi cả hai mà không ai thấy lỗi. Thiếu dòng đó thì hệ thống báo lỗi rõ ràng và dừng. | DB (`ck_cau_hinh_quan_ma_quan`) + APP |
+| O4 | `ma_quan` là **GHI MỘT LẦN**. Không có hàm ghi, không có ô nhập liệu, không có màn hình sửa. Đổi nó là một quy trình có văn bản chứ không phải một cú bấm. Thời điểm cuối cùng còn đổi rẻ: trước Bước 5A.4. | APP + `tests/Feature/Support/MaQuanDocDuocKhiCacheRongTest.php` |
+| O5 | `ma_quan` đọc **thẳng từ database, không qua cache**, và nhớ trong bộ nhớ tiến trình. Từ 5A.4 mọi khoá cache mang tiền tố là mã quán — đọc mã quán qua cache là con gà và quả trứng. | APP (`CauHinhQuan::maQuan`) |
+| O6 | Ba ngưỡng nhớ tạm trong phạm vi **một request**, không nhớ kiểu `forever`. Đây không phải chuyện chạy nhanh: `WriteOffStock` đọc ngưỡng hao hụt hai lần, lần thứ hai nằm **bên trong giao dịch đang giữ khoá**. Nhớ tạm giữ cho lần đó không phải chạy thêm câu hỏi nào xuống database. | APP |
+| O7 | Mọi lần ghi đi qua `updateOrInsert` trên khoá UNIQUE `khoa`. **Cấm đọc-rồi-ghi**: hai người cùng bấm lưu thì đọc-rồi-ghi làm mất lặng lẽ một trong hai lần đổi. | APP |
+| O8 | Mỗi lần đổi ghi một dòng `activity_log` (`log_name = 'cau-hinh-nguong'`, `event` = tên khoá): ai đổi, lúc nào, từ bao nhiêu sang bao nhiêu. Ghi cả khi giá trị không đổi — "đã có người vào đây" cũng là điều đáng biết. | APP + `tests/Feature/Support/DoiNguongCauHinhCoGhiNhatKyTest.php` |
+
+## O.4. Chưa làm ở bước này
+
+- Tài khoản ngân hàng VietQR (5A.2), thông tin quán trên hoá đơn và địa chỉ máy in (5A.3)
+  — cùng bảng này, thêm dòng, không đổi hình dạng bảng.
+- Trang Filament "Cấu hình quán" gộp bốn nhóm (5A.3). Màn hình "Ngưỡng cảnh báo" hiện
+  có vẫn chạy nguyên như cũ.
