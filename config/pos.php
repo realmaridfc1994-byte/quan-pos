@@ -5,12 +5,35 @@ declare(strict_types=1);
 return [
     /*
     |--------------------------------------------------------------------------
+    | Mã định danh của quán — Phase 5 Bước 5A.1
+    |--------------------------------------------------------------------------
+    |
+    | Con số này ở đây CHỈ để migration lần đầu có cái mà ghi vào bảng
+    | `cau_hinh_quan`. Sau lần đó, nguồn chân lý là database, không phải file
+    | này — sửa dòng dưới đây không đổi được mã quán đang chạy.
+    |
+    | GHI MỘT LẦN, và cố tình không có màn hình sửa. Mã quán sẽ nằm trong khoá
+    | cache (5A.4), trong đường dẫn IN LÊN TEM QR GIẤY dán bàn (5A.5), và trong
+    | dữ liệu nằm sẵn ở máy tính bảng (5A.6). Đổi nó sau ba bước đó là làm mồ
+    | côi cả ba thứ, mà tem giấy thì không sửa được bằng deploy.
+    |
+    | Vì sao chuỗi ngắn gõ được chứ không phải dãy số ngẫu nhiên: nó xuất hiện
+    | trong đường dẫn khách nhìn thấy trên điện thoại, và người vận hành phải
+    | đọc được, gõ lại được qua điện thoại khi có sự cố.
+    |
+    | Thời điểm cuối cùng còn đổi rẻ: TRƯỚC bước 5A.4.
+    */
+
+    'ma_quan' => env('POS_MA_QUAN', 'quan-nhau'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Hai ngưỡng chủ quán tự chỉnh được — Phase 3 Bước 6/8
     |--------------------------------------------------------------------------
     |
     | Đây chỉ là GIÁ TRỊ KHỞI ĐẦU. Chủ quán chỉnh lại trong Filament (màn hình
-    | "Ngưỡng cảnh báo"), giá trị mới lưu vào kho cấu hình và đè lên hai số
-    | dưới đây — xem App\Support\CauHinhQuan.
+    | "Ngưỡng cảnh báo"), giá trị mới lưu vào bảng `cau_hinh_quan` và đè lên
+    | hai số dưới đây — xem App\Support\CauHinhQuan.
     |
     | Vì sao 25% chứ không phải 15%: bia lãi 20-30%, món nấu lãi 50-70%. Đặt
     | ngưỡng 15% thì gần như không món nào rơi vào, mà một cảnh báo không bao
@@ -50,7 +73,7 @@ return [
     | thì lệnh tự hạ mốc xuống, câu cảnh báo tự tắt cho phần đã kiểm.
     |
     | Giá trị này chỉ là mốc KHỞI ĐẦU (giống hai ngưỡng trên): mốc thật lưu
-    | trong kho cấu hình dùng chung — xem App\Support\CauHinhQuan.
+    | trong bảng `cau_hinh_quan` — xem App\Support\CauHinhQuan.
     */
 
     'moc_ngay_kiem_thieu_gia_von' => '2026-08-10',

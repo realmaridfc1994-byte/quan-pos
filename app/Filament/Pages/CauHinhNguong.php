@@ -18,8 +18,9 @@ use Filament\Pages\Page;
 /**
  * Hai ngưỡng chủ quán tự chỉnh — Phase 3 Bước 6/8.
  *
- * CHỈ owner vào được. Không có bảng riêng: giá trị lưu qua App\Support\
- * CauHinhQuan (kho cấu hình dùng chung, bảng `cache` có sẵn từ Phase 0).
+ * CHỈ owner vào được. Giá trị lưu qua App\Support\CauHinhQuan, trong bảng
+ * `cau_hinh_quan` (từ Phase 5 Bước 5A.1; trước đó nằm nhờ trong bảng `cache`
+ * và bị `php artisan cache:clear` xoá mất).
  *
  * Cả hai con số mặc định là ĐIỂM KHỞI ĐẦU, không phải chân lý — chủ quán nhìn
  * dữ liệu thật vài tuần rồi tự kéo lên hoặc xuống. Lý do chọn 25% và 200.000đ
@@ -88,9 +89,10 @@ final class CauHinhNguong extends Page implements HasForms
 
     /**
      * Một câu nói thẳng cho chủ quán biết con số đang có hiệu lực là mặc định
-     * hay do người nào đó đổi — vì hai ngưỡng này nằm trong kho cấu hình dùng
-     * chung, `php artisan cache:clear` sẽ đưa chúng về mặc định mà màn hình
-     * không có cách nào khác để nói ra chuyện đó.
+     * hay do người nào đó đổi. Từ 5A.1 hai ngưỡng đã nằm trong bảng riêng nên
+     * không còn tự bốc hơi theo cache nữa, nhưng câu này vẫn đáng giữ: nó trả
+     * lời câu hỏi "số này ở đâu ra" ngay trên màn hình, thay vì bắt chủ quán
+     * đi tìm trong nhật ký.
      */
     private static function moTaNguon(string $khoa, bool $laTien): string
     {
