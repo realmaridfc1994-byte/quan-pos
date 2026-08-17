@@ -31,7 +31,7 @@ final class CreatePurchase
 
         $this->kiemTraTrungNguyenLieu($data->lines);
 
-        return DB::transaction(function () use ($data): Purchase {
+        return DB::connection('tenant')->transaction(function () use ($data): Purchase {
             // Mã hiển thị cần ID tự tăng mới sinh đúng — ghi trước bằng mã tạm
             // (uuid, chắc chắn không trùng ai), có id thật rồi mới gán mã thật,
             // cùng một transaction. Cùng cách làm với OpenTableSession.

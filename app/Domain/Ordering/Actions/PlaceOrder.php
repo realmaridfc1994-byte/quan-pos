@@ -43,7 +43,7 @@ final class PlaceOrder
             throw new DomainException('Phải gọi ít nhất một món.');
         }
 
-        return DB::transaction(function () use ($data): Order {
+        return DB::connection('tenant')->transaction(function () use ($data): Order {
             $donCu = Order::query()->where('uuid', $data->uuid)->first();
             if ($donCu !== null) {
                 return $donCu;

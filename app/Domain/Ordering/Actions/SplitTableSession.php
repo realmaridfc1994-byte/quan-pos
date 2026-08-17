@@ -57,7 +57,7 @@ final class SplitTableSession
             throw new DomainException('Phải gán ít nhất một bàn cho lượt khách mới.');
         }
 
-        return DB::transaction(function () use ($data): array {
+        return DB::connection('tenant')->transaction(function () use ($data): array {
             // Bấm tách bàn hai lần vì mạng lag: trả lại đúng lượt khách mới đã
             // tạo lần đầu, không tách thêm lần nữa — giống dedup theo uuid ở
             // OpenTableSession.

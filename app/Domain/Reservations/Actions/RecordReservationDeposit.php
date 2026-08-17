@@ -32,7 +32,7 @@ final class RecordReservationDeposit
 {
     public function handle(RecordReservationDepositData $data): Payment
     {
-        return DB::transaction(function () use ($data): Payment {
+        return DB::connection('tenant')->transaction(function () use ($data): Payment {
             // Bấm gửi hai lần vì mạng lag: trả về đúng phiếu cọc cũ, không ghi lần hai.
             $daCo = Payment::query()->where('uuid', $data->uuid)->first();
             if ($daCo !== null) {

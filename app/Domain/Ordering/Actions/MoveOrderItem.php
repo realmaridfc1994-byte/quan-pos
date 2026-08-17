@@ -45,7 +45,7 @@ final class MoveOrderItem
             throw new DomainException('Lượt khách nguồn và lượt khách đích không được trùng nhau.');
         }
 
-        return DB::transaction(function () use ($data): array {
+        return DB::connection('tenant')->transaction(function () use ($data): array {
             $idLuotTheoThuTu = collect([$data->sourceTableSessionId, $data->targetTableSessionId])->sort()->values();
 
             $luotTheoId = TableSession::query()

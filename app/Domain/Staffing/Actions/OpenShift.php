@@ -27,7 +27,7 @@ final class OpenShift
 {
     public function handle(OpenShiftData $data): Shift
     {
-        return DB::transaction(function () use ($data): Shift {
+        return DB::connection('tenant')->transaction(function () use ($data): Shift {
             $dangCoCaMo = Shift::query()->where('status', ShiftStatus::Open)->lockForUpdate()->first();
 
             if ($dangCoCaMo !== null) {

@@ -51,7 +51,7 @@ final class MarkDepositHandled
             throw new DomainException('Phải ghi rõ vì sao xử lý tiền cọc như vậy.');
         }
 
-        return DB::transaction(function () use ($data, $lyDo): Reservation {
+        return DB::connection('tenant')->transaction(function () use ($data, $lyDo): Reservation {
             $reservation = Reservation::query()->lockForUpdate()->findOrFail($data->reservationId);
 
             // Chỉ đặt bàn khách KHÔNG TỚI hoặc đã huỷ mới có cọc treo cần quyết.

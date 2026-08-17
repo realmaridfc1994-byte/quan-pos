@@ -25,7 +25,7 @@ final class TransferTable
             throw new DomainException('Bàn cũ và bàn mới không được trùng nhau.');
         }
 
-        return DB::transaction(function () use ($data): TableSessionTable {
+        return DB::connection('tenant')->transaction(function () use ($data): TableSessionTable {
             $tableSession = TableSession::query()->lockForUpdate()->findOrFail($data->tableSessionId);
 
             if ($tableSession->status !== TableSessionStatus::Open) {

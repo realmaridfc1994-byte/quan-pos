@@ -37,7 +37,7 @@ final class CloseShift
 {
     public function handle(CloseShiftData $data): Shift
     {
-        $shift = DB::transaction(function () use ($data): Shift {
+        $shift = DB::connection('tenant')->transaction(function () use ($data): Shift {
             $shift = Shift::query()->lockForUpdate()->findOrFail($data->shiftId);
 
             if ($shift->status !== ShiftStatus::Open) {

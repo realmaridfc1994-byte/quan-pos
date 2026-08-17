@@ -17,7 +17,7 @@ final class AttachTable
 {
     public function handle(AttachTableData $data): TableSessionTable
     {
-        return DB::transaction(function () use ($data): TableSessionTable {
+        return DB::connection('tenant')->transaction(function () use ($data): TableSessionTable {
             $tableSession = TableSession::query()->lockForUpdate()->findOrFail($data->tableSessionId);
 
             if ($tableSession->status !== TableSessionStatus::Open) {

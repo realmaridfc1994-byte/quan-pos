@@ -26,7 +26,7 @@ final class SummarizeIngredientWasteMonthly
         $dauThang = Carbon::parse($anyDateInMonth)->startOfMonth();
         $cuoiThang = $dauThang->clone()->endOfMonth();
 
-        return DB::transaction(function () use ($dauThang, $cuoiThang): Collection {
+        return DB::connection('tenant')->transaction(function () use ($dauThang, $cuoiThang): Collection {
             IngredientWasteMonthly::query()->where('month', $dauThang->toDateString())->delete();
 
             $tongTheoNguyenLieu = StockMovement::query()

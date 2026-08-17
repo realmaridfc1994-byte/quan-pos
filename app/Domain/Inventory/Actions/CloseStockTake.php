@@ -35,7 +35,7 @@ final class CloseStockTake
 
     public function handle(CloseStockTakeData $data): StockTake
     {
-        return DB::transaction(function () use ($data): StockTake {
+        return DB::connection('tenant')->transaction(function () use ($data): StockTake {
             $phieu = StockTake::query()->lockForUpdate()->findOrFail($data->stockTakeId);
 
             if ($phieu->status !== StockTakeStatus::Open) {

@@ -23,7 +23,7 @@ final class RemoveOrderItem
 {
     public function handle(RemoveOrderItemData $data): OrderItem
     {
-        return DB::transaction(function () use ($data): OrderItem {
+        return DB::connection('tenant')->transaction(function () use ($data): OrderItem {
             $order = Order::query()->lockForUpdate()->findOrFail($data->orderId);
             $orderItem = OrderItem::query()->where('order_id', $order->id)->findOrFail($data->orderItemId);
 

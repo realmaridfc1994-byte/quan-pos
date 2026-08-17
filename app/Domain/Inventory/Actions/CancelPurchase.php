@@ -29,7 +29,7 @@ final class CancelPurchase
             throw new DomainException('Phải ghi lý do khi huỷ phiếu nhập.');
         }
 
-        return DB::transaction(function () use ($data): Purchase {
+        return DB::connection('tenant')->transaction(function () use ($data): Purchase {
             $purchase = Purchase::query()->lockForUpdate()->findOrFail($data->purchaseId);
 
             if ($purchase->status === PurchaseStatus::Received) {

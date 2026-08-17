@@ -39,7 +39,7 @@ final class RecordPayment
 
     public function handle(RecordPaymentData $data): Payment
     {
-        return DB::transaction(function () use ($data): Payment {
+        return DB::connection('tenant')->transaction(function () use ($data): Payment {
             $phieuDaCo = Payment::query()->where('uuid', $data->uuid)->first();
 
             if ($phieuDaCo !== null) {

@@ -112,7 +112,7 @@ final class PosDemo extends Command
 
         $this->newLine();
 
-        DB::beginTransaction();
+        DB::connection('tenant')->beginTransaction();
 
         try {
             [$thuNgan, $ca] = $this->dienTapMoCa($moCa);
@@ -124,7 +124,7 @@ final class PosDemo extends Command
                 $this->line('<fg=green;options=bold>✅ ĐỒNG BỘ CHẠY ĐÚNG</>');
                 $this->line('<fg=yellow>Đã dọn sạch toàn bộ dữ liệu diễn tập (rollback, không có gì được ghi thật vào database).</>');
 
-                DB::rollBack();
+                DB::connection('tenant')->rollBack();
 
                 return CommandAlias::SUCCESS;
             }
@@ -136,7 +136,7 @@ final class PosDemo extends Command
                 $this->line('<fg=green;options=bold>✅ TRỪ KHO CHẠY ĐÚNG</>');
                 $this->line('<fg=yellow>Đã dọn sạch toàn bộ dữ liệu diễn tập (rollback, không có gì được ghi thật vào database).</>');
 
-                DB::rollBack();
+                DB::connection('tenant')->rollBack();
 
                 return CommandAlias::SUCCESS;
             }
@@ -148,7 +148,7 @@ final class PosDemo extends Command
                 $this->line('<fg=green;options=bold>✅ KHUYẾN MÃI CHẠY ĐÚNG</>');
                 $this->line('<fg=yellow>Đã dọn sạch toàn bộ dữ liệu diễn tập (rollback, không có gì được ghi thật vào database).</>');
 
-                DB::rollBack();
+                DB::connection('tenant')->rollBack();
 
                 return CommandAlias::SUCCESS;
             }
@@ -188,7 +188,7 @@ final class PosDemo extends Command
             $this->line('<fg=red>   Lý do: '.$e->getMessage().'</>');
             $ketQua = CommandAlias::FAILURE;
         } finally {
-            DB::rollBack();
+            DB::connection('tenant')->rollBack();
         }
 
         $this->newLine();

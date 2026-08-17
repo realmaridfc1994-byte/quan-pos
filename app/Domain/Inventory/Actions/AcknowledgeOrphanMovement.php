@@ -46,7 +46,7 @@ final class AcknowledgeOrphanMovement
             throw new DomainException('Phải ghi rõ vì sao dòng này không phải lỗi, ít nhất '.self::DO_DAI_TOI_THIEU.' ký tự.');
         }
 
-        return DB::transaction(function () use ($data, $note, $reason): StockReconciliationNote {
+        return DB::connection('tenant')->transaction(function () use ($data, $note, $reason): StockReconciliationNote {
             $movement = StockMovement::query()->findOrFail($data->stockMovementId);
 
             // Xác nhận hai lần: trả về đúng ghi chú cũ, không ghi đè lý do của

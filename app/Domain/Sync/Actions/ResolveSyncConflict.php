@@ -128,7 +128,7 @@ final class ResolveSyncConflict
 
         $this->duyetPinTruocGiaoDich($conflictSoBo, $data);
 
-        return DB::transaction(function () use ($data, $lyDo): SyncConflict {
+        return DB::connection('tenant')->transaction(function () use ($data, $lyDo): SyncConflict {
             $conflict = SyncConflict::query()->lockForUpdate()->findOrFail($data->conflictId);
 
             if ($conflict->status !== ConflictStatus::Pending) {

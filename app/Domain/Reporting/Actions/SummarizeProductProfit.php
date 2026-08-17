@@ -37,7 +37,7 @@ final class SummarizeProductProfit
     {
         $ngay = Carbon::parse($date)->startOfDay();
 
-        return DB::transaction(function () use ($ngay): Collection {
+        return DB::connection('tenant')->transaction(function () use ($ngay): Collection {
             $soat = $this->soatThieuGiaVon->handle($ngay->toDateString());
 
             ProductProfitDaily::query()->where('date', $ngay->toDateString())->delete();

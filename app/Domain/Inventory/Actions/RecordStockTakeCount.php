@@ -19,7 +19,7 @@ final class RecordStockTakeCount
 {
     public function handle(RecordStockTakeCountData $data): StockTakeItem
     {
-        return DB::transaction(function () use ($data): StockTakeItem {
+        return DB::connection('tenant')->transaction(function () use ($data): StockTakeItem {
             $dong = StockTakeItem::query()->lockForUpdate()->findOrFail($data->stockTakeItemId);
             $phieu = StockTake::query()->lockForUpdate()->findOrFail($dong->stock_take_id);
 

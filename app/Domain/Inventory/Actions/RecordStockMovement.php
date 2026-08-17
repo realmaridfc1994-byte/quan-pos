@@ -38,7 +38,7 @@ final class RecordStockMovement
             throw new DomainException('Thiếu mã vân tay của dòng sổ cái kho.');
         }
 
-        return DB::transaction(function () use ($data): StockMovement {
+        return DB::connection('tenant')->transaction(function () use ($data): StockMovement {
             // Ghi hai lần vì mạng lag hoặc vì Action cha bị gọi lại: trả về
             // đúng dòng sổ cái cũ, KHÔNG ghi lần hai, không ném lỗi — cùng
             // khuôn RecordPayment. Đặt TRƯỚC lockForUpdate: đã có dòng rồi thì

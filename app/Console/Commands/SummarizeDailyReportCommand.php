@@ -147,7 +147,7 @@ final class SummarizeDailyReportCommand extends Command
         $doanhThuCu = DailySummary::query()->where('date', $ngay->toDateString())->value('revenue_amount');
 
         try {
-            return DB::transaction(function () use ($ngay, $tomTatNgay, $laiGopTheoMon, $doanhThuCu): array {
+            return DB::connection('tenant')->transaction(function () use ($ngay, $tomTatNgay, $laiGopTheoMon, $doanhThuCu): array {
                 $tomTat = $tomTatNgay->handle($ngay->toDateString());
                 $dongLaiGop = $laiGopTheoMon->handle($ngay->toDateString());
 

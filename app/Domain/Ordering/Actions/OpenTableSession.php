@@ -43,7 +43,7 @@ final class OpenTableSession
             throw new DomainException('Bàn chính phải nằm trong danh sách bàn được chọn.');
         }
 
-        return DB::transaction(function () use ($data): TableSession {
+        return DB::connection('tenant')->transaction(function () use ($data): TableSession {
             $daCo = TableSession::query()->where('uuid', $data->uuid)->first();
             if ($daCo !== null) {
                 return $daCo;

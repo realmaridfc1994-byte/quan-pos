@@ -15,7 +15,7 @@ final class ConfirmReservation
 {
     public function handle(ConfirmReservationData $data): Reservation
     {
-        return DB::transaction(function () use ($data): Reservation {
+        return DB::connection('tenant')->transaction(function () use ($data): Reservation {
             $reservation = Reservation::query()->lockForUpdate()->findOrFail($data->reservationId);
 
             if ($reservation->status !== ReservationStatus::Pending) {
