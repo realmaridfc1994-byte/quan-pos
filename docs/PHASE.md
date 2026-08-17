@@ -1,6 +1,63 @@
-# BƯỚC 5A.0 — KẾT NỐI TENANT — ✅ ĐÓNG 17/08
+# BƯỚC 5A.1 — BẢNG CẤU HÌNH QUÁN BỀN VỮNG — ✅ ĐÓNG 17/08
 
-Bước đang mở tiếp theo: **5A.1**.
+Bước đang mở tiếp theo: **5A.2** — VietQR vào bảng cấu hình + chặn cứng.
+Tier **Cao**, Opus tự làm, không giao Sonnet: đó là đường đi của tiền.
+
+Nguồn: docs/phase-5-huong-dan-thuc-thi-v2.md, mục 2
+
+## Được phép chạm — ✅ XONG CẢ 11 FILE
+- `database/migrations/2026_08_17_000001_create_cau_hinh_quan_table.php` (mới)
+- `database/migrations/2026_08_17_000002_chuyen_nguong_cau_hinh_tu_cache_sang_bang.php` (mới)
+- `app/Support/CauHinhQuan.php` — đổi nguồn đọc/ghi
+- `config/pos.php` — thêm `ma_quan`, sửa hai đoạn chú thích đã thành sai
+- `docs/schema.md` — PHẦN O, bảng thứ 23
+- `docs/viec-ton.md` — 2 việc ngoài phạm vi
+- `app/Filament/Pages/CauHinhNguong.php` — **CHỈ chú thích**, không một dòng lệnh
+- 4 file test mới trong `tests/Feature/Support/`
+
+## Cấm
+- Bất kỳ file test cũ nào. Thấy cần sửa test → DỪNG, báo Bin
+- `WriteOffStock`, `GetOwnerProfitDashboard`, `SummarizeDailyReportCommand`,
+  `WasteRecordResource` — bốn chỗ gọi `CauHinhQuan`, không được sửa dòng nào
+- `.env`
+- Mọi thứ không có trong danh sách trên
+
+## Cổng đóng bước — ✅ ĐẠT
+- Toàn bộ suite **861 xanh** (840 cũ + 21 mới), 5.848 khẳng định, chạy 2 lần
+  liên tiếp cùng con số. **Không sửa một dòng test cũ nào**
+- Pint sạch; phpstan 324 dòng trước = 324 dòng sau, không thêm lỗi mới
+- Chữ ký 8 hàm public của `CauHinhQuan` không đổi một chữ; không chỗ gọi nào
+  phải sửa. Chỉ thêm `maQuan()`
+- Trên database dev, di trú chép đúng giá trị đang có
+  (`moc_ngay_kiem_thieu_gia_von` = `2026-08-01` sang nguyên vẹn)
+
+### Một test cũ đã đỏ giữa đường — và nó đúng
+Lần chạy đầu, `SummarizeRangeCommandTest` đỏ: lệnh `report:summarize` hạ mốc
+ngày rồi đọc lại mốc trong cùng một lần chạy, mà bộ nhớ tạm mới thêm làm nó đọc
+ra số cũ. **Sửa ở phía code, không đụng test** — mỗi lần ghi nay báo cho các đối
+tượng `CauHinhQuan` khác trong cùng tiến trình biết mà hỏi lại (`$theHe`).
+Đây đúng loại việc mà luật "cấm sửa test cũ" sinh ra để bắt.
+
+## Trạng thái khi đóng bước
+- Bảng `cau_hinh_quan` có 4 dòng: `ma_quan` (dòng đầu tiên), 2 ngưỡng, 1 mốc ngày
+- **`ma_quan` = `quan-nhau`** — Bin chốt 17/08. **GHI MỘT LẦN**: không hàm ghi,
+  không ô nhập liệu, có ràng buộc CHECK ở tầng database không cho để trống.
+  Thời điểm cuối cùng còn đổi rẻ đã qua khi 5A.4 xong — sau đó nó nằm trong khoá
+  cache, trên tem QR giấy dán bàn và trong Dexie ở máy tính bảng
+- `gia_tri` = NULL nghĩa là "chưa ai chỉnh, đang dùng số khởi đầu trong
+  `config/pos.php`". Nút đặt lại mặc định ghi NULL chứ KHÔNG xoá dòng
+- `php artisan cache:clear` không còn làm mất ngưỡng nào
+
+## Việc bước sau thừa hưởng (đã ghi đủ trong docs/viec-ton.md)
+- Tên test cũ `CauHinhNguongTest.php:109` còn nhắc "cache:clear" — nay lệch
+  nghĩa, test vẫn xanh và vẫn kiểm đúng luật. Đổi tên khi có lần đụng tiếp theo
+- Hai migration của bước này chạy trên kết nối MẶC ĐỊNH, giống 58 migration
+  đang có. Ngày tách phiên (5B) phải chuyển **cả đường migration một lượt**,
+  không sửa lẻ
+
+---
+
+# BƯỚC 5A.0 — KẾT NỐI TENANT — ✅ ĐÓNG 17/08
 
 Nguồn: docs/phase-5-huong-dan-thuc-thi-v2.md, mục 1.2
 
